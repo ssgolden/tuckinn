@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tuckinn Proper | Platinum</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body x-data="tuckinn()" x-cloak>
+    <div id="app">
+        <!-- HEADER -->
+        <header class="logo-header">
+            <div class="d-flex justify-content-between align-items-center w-100 px-3">
+                <div @click="isDrawerOpen = true" style="cursor:pointer;"><span class="material-icons text-danger fs-3">menu</span></div>
+                <img src="logo.jpg" alt="TUCKINN" style="max-height:40px;" @click="view = 'home'">
+                <div class="vip-badge" @click="view = 'account'">
+                    <span class="material-icons text-danger fs-3">account_circle</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- SIDE DRAWER -->
+        <div class="drawer-overlay" x-show="isDrawerOpen" @click="isDrawerOpen = false" x-transition.opacity style="display: none;"></div>
+        <div class="side-drawer" :class="{'open': isDrawerOpen}">
+            <div class="drawer-header">
+                <h3>Platinum Menu</h3>
+                <span class="material-icons text-danger fs-3" @click="isDrawerOpen = false" style="cursor:pointer;">close</span>
+            </div>
+            <div class="drawer-links mt-2">
+                <template x-for="(items, category) in fullMenu" :key="category">
+                    <div class="drawer-item" @click="openCategory(category)">
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="material-icons text-danger drawer-icon" x-text="getCategoryIcon(category)"></span>
+                            <span class="fw-bold text-white fs-6" x-text="category"></span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="drawer-count" x-text="items.length"></span>
+                            <span class="material-icons text-danger">chevron_right</span>
+                        </div>
+                    </div>
+                </template>
+                <div class="drawer-item mt-4 border-top border-bottom border-danger" style="background: rgba(255,59,59,0.05);" @click="startBuilder('sandwich'); isDrawerOpen = false">
+                    <span class="fw-bold text-danger fs-5">Build Proper Sandwich</span>
+                    <span class="material-icons text-danger">lunch_dining</span>
+                </div>
+            </div>
+        </div>
+
+        <main class="flex-grow-1" style="padding-bottom: 80px;">
+            <!-- HOME VIEW -->
+            <template x-if="view === 'home'">
+                <div class="view-enter">
+
+                    <!-- Loading Skeleton -->
+                    <template x-if="isLoading">
+                        <div>
+                            <div class="hero-wrapper">
+                                <div class="skeleton-hero">
+                                    <div class="skeleton skeleton-logo"></div>
+                                    <div class="skeleton skeleton-title"></div>
+                                    <div class="skeleton skeleton-tagline"></div>
+                                    <div class="skeleton-features mt-4 mb-4">
+                                        <div class="skeleton skeleton-feature"></div>
+                                        <div class="skeleton skeleton-feature"></div>
+                                        <div class="skeleton skeleton-feature"></div>
+                                    </div>
+                                    <div class="skeleton skeleton-btn"></div>
+                                </div>
+                            </div>
+                            <div class="p-4">
+                                <div class="skeleton" style="height:24px;width:140px;margin-bottom:16px;border-radius:6px;"></div>
+                                <div class="skeleton" style="height:80px;border-radius:16px;margin-bottom:12px;"></div>
+                                <div class="skeleton" style="height:80px;border-radius:16px;margin-bottom:12px;"></div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Actual Home Content -->
+                    <template x-if="!isLoading">
+                        <div>
+                            <!-- HERO SECTION -->
+                            <div class="hero-wrapper">
+                                <div class="hero-bg-animation">
+                                    <div class="hero-gradient"></div>
+                                    <div class="hero-particles">
+                                        <span></span><span></span><span></span><span></span><span></span>
+                                    </div>
+                                </div>
+                                <div class="hero-content text-center">
+                                    <div class="hero-logo-badge mb-3">
+                                        <span class="material-icons text-danger" style="font-size: 3rem; filter: drop-shadow(0 0 20px rgba(255,59,59,0.5));">restaurant</span>
+                                    </div>
+                                    <h1 class="hero-title text-danger fw-bolder">TUCKINN PROPER</h1>
+                                    <p class="hero-tagline text-white-50 fw-bold tracking-widest text-uppercase">Premium Ingredients. Your Rules.</p>
+                                    <div class="hero-features mt-4 mb-4">
+                                        <div class="hero-feature"><span class="material-icons text-danger" style="font-size:1.2rem;">lunch_dining</span><span>Freshly Made</span></div>
+                                        <div class="hero-feature"><span class="material-icons text-warning" style="font-size:1.2rem;">local_shipping</span><span>Collection</span></div>
+                                        <div class="hero-feature"><span class="material-icons text-success" style="font-size:1.2rem;"> storefront</span><span>Dine In</span></div>
+                                    </div>
+                                    <button class="btn btn-danger btn-hero mt-2 px-5 py-3 fw-bold text-uppercase shadow-lg" @click="isDrawerOpen = true">
+                                        <span class="material-icons me-2" style="font-size:1.2rem; vertical-align: middle;">restaurant_menu</span>
+                                        View Full Menu
+                                    </button>
+                                </div>
+                                <div class="hero-scroll-hint">
+                                    <span class="material-icons text-white-50 animate-bounce">keyboard_arrow_down</span>
+                                </div>
+                            </div>
+
+                            <!-- QUICK ACTIONS -->
+                            <div class="p-4">
+                                <h4 class="mb-3 text-white fw-bold mt-2">Quick Build</h4>
+                                <div class="builder-card-large mb-3" @click="startBuilder('sandwich')">
+                                    <div class="builder-content w-100">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h3 class="text-white fw-bold m-0">Build Your Sandwich</h3>
+                                                <p class="text-white small m-0 mt-1">Design your artisan build</p>
+                                            </div>
+                                            <span class="material-icons text-danger fs-1">lunch_dining</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="builder-card-large mb-3" @click="openCategory('Meal Deals')">
+                                    <div class="builder-content w-100">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h3 class="text-white fw-bold m-0">Meal Deals</h3>
+                                                <p class="text-white small m-0 mt-1">Best value combinations</p>
+                                            </div>
+                                            <span class="material-icons text-warning fs-1">local_dining</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                </div>
+            </template>
+
+            <!-- FULL MENU VIEW -->
+            <template x-if="view === 'full-menu'">
+                <div class="view-enter p-4">
+
+                    <!-- Loading Skeleton -->
+                    <template x-if="isLoading">
+                        <div>
+                            <div class="skeleton-category-header">
+                                <div class="skeleton skeleton-cat-title"></div>
+                                <div class="skeleton skeleton-cat-icon"></div>
+                            </div>
+                            <div class="row g-3">
+                                <div class="col-12"><div class="skeleton" style="height:100px;border-radius:16px;margin-bottom:12px;"></div></div>
+                                <div class="col-12"><div class="skeleton" style="height:100px;border-radius:16px;margin-bottom:12px;"></div></div>
+                                <div class="col-12"><div class="skeleton" style="height:100px;border-radius:16px;margin-bottom:12px;"></div></div>
+                                <div class="col-12"><div class="skeleton" style="height:100px;border-radius:16px;margin-bottom:12px;"></div></div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Actual Menu Content -->
+                    <template x-if="!isLoading">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom border-danger">
+                                <h2 class="fw-bolder text-danger m-0 text-uppercase" x-text="activeCategory"></h2>
+                                <span class="material-icons text-white fs-3" @click="isDrawerOpen = true" style="cursor:pointer;">menu_open</span>
+                            </div>
+                            <div class="row g-3">
+                                <template x-for="item in fullMenu[activeCategory]" :key="item.name">
+                                    <div class="col-12">
+                                        <div class="menu-item-card tuckinn-card p-4" :class="{'item-added': item.justAdded}">
+                                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                                <h5 class="fw-bold text-white m-0 pe-3 lh-sm" x-text="item.name"></h5>
+                                                <span class="price-badge text-danger fw-bolder" x-text="'€' + item.price.toFixed(2)"></span>
+                                            </div>
+                                            <p class="text-white-50 small mb-3" x-text="item.desc"></p>
+                                            <button class="btn btn-add-cart w-100 fw-bold py-2 text-uppercase"
+                                                    :class="item.justAdded ? 'btn-success' : 'btn-outline-danger'"
+                                                    @click="addToCart({name: item.name, price: item.price, desc: item.desc}); item.justAdded = true; setTimeout(() => item.justAdded = false, 800)">
+                                                <span class="material-icons me-1" style="font-size:1rem; vertical-align: middle;" x-text="item.justAdded ? 'check' : 'add'"></span>
+                                                <span x-text="item.justAdded ? 'Added!' : 'Add to Order'"></span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                </div>
+            </template>
+
+            <!-- TIER SELECT (Sandwich) -->
+            <template x-if="view === 'tier-select'">
+                <div class="p-4 view-enter">
+                    <div class="text-center mb-4">
+                        <div class="tier-header-icon">
+                            <span class="material-icons text-danger">lunch_dining</span>
+                        </div>
+                        <h2 class="fw-bolder text-white mt-3">Build Your Sandwich</h2>
+                        <p class="text-white-50">Choose your tier to get started</p>
+                    </div>
+
+                    <div class="row g-4">
+                        <div class="col-12">
+                            <div class="tier-card tier-premium" :class="{'selected': selectedTier === 'premium'}" @click="selectedTier = 'premium'">
+                                <div class="tier-badge-popular" x-show="selectedTier !== 'deluxe'">Most Popular</div>
+                                <div class="tier-content">
+                                    <div class="tier-icon">
+                                        <span class="material-icons">star</span>
+                                    </div>
+                                    <div class="tier-info">
+                                        <h3 class="tier-name">Premium</h3>
+                                        <div class="tier-price">€6.45</div>
+                                    </div>
+                                </div>
+                                <div class="tier-features-list">
+                                    <div class="tier-feature"><span class="material-icons">check</span> 1x Protein</div>
+                                    <div class="tier-feature"><span class="material-icons">check</span> 1x Cheese</div>
+                                    <div class="tier-feature"><span class="material-icons">check</span> 2x Fresh Veg</div>
+                                    <div class="tier-feature"><span class="material-icons">check</span> 1x Sauce</div>
+                                </div>
+                                <div class="tier-select-indicator">
+                                    <span class="material-icons" x-show="selectedTier === 'premium'">check_circle</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="tier-card tier-deluxe" :class="{'selected': selectedTier === 'deluxe'}" @click="selectedTier = 'deluxe'">
+                                <div class="tier-badge-deluxe">Best Value</div>
+                                <div class="tier-content">
+                                    <div class="tier-icon">
+                                        <span class="material-icons">workspace_premium</span>
+                                    </div>
+                                    <div class="tier-info">
+                                        <h3 class="tier-name">Deluxe</h3>
+                                        <div class="tier-price">€8.95</div>
+                                    </div>
+                                </div>
+                                <div class="tier-features-list">
+                                    <div class="tier-feature"><span class="material-icons">check</span> 2x Protein</div>
+                                    <div class="tier-feature"><span class="material-icons">check</span> 2x Cheese</div>
+                                    <div class="tier-feature"><span class="material-icons">check</span> 3x Fresh Veg</div>
+                                    <div class="tier-feature"><span class="material-icons">check</span> 1x Sauce</div>
+                                </div>
+                                <div class="tier-select-indicator">
+                                    <span class="material-icons" x-show="selectedTier === 'deluxe'">check_circle</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-builder-start w-100 mt-4 py-3 fw-bold" @click="selectTier(selectedTier)" :disabled="!selectedTier">
+                        <span>Start Building</span>
+                        <span class="material-icons">arrow_forward</span>
+                    </button>
+
+                    <div class="text-center mt-4">
+                        <button class="btn btn-link text-white-50 fw-bold text-decoration-none text-uppercase" @click="view = 'home'">Cancel</button>
+                    </div>
+                </div>
+            </template>
+
+            <!-- BUILDER VIEW -->
+            <template x-if="view === 'build'">
+                <div class="p-4 view-enter builder-view">
+                    <!-- Builder Header -->
+                    <div class="builder-header">
+                        <div class="builder-back" @click="prevStep()">
+                            <span class="material-icons">arrow_back</span>
+                        </div>
+                        <div class="builder-progress">
+                            <div class="progress-track">
+                                <div class="progress-fill" :style="{width: ((builderStep - 1) / totalSteps * 100) + '%'}"></div>
+                            </div>
+                            <div class="progress-steps">
+                                <template x-for="(step, idx) in sandwichSteps" :key="step.id">
+                                    <div class="progress-step" :class="{'active': builderStep === idx + 1, 'done': builderStep > idx + 1}">
+                                        <div class="step-dot">
+                                            <span class="material-icons" x-show="builderStep > idx + 1" style="font-size:12px;">check</span>
+                                            <span x-show="builderStep <= idx + 1" x-text="idx + 1"></span>
+                                        </div>
+                                        <span class="step-label" x-text="step.id"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="builder-price">
+                            <span class="material-icons">shopping_basket</span>
+                            <span x-text="cart.reduce((s,i) => s + (i.quantity||1), 0)"></span>
+                        </div>
+                    </div>
+
+                    <!-- Sandwich Preview -->
+                    <div class="sandwich-preview-wrapper" x-show="builderType === 'sandwich' && Object.keys(currentBuild.selections || {}).length > 0">
+                        <div class="sandwich-visual" id="sandwichVisual">
+                            <!-- Layers injected by JS -->
+                        </div>
+                        <div class="sandwich-layers-list" id="sandwichTags">
+                            <!-- Tags injected by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Live Summary (text only for other builders) -->
+                    <div class="builder-summary" x-show="builderType !== 'sandwich' || Object.keys(currentBuild.selections || {}).length === 0">
+                        <div class="summary-title">Your Selection</div>
+                        <template x-for="(sel, key) in currentBuild.selections" :key="key">
+                            <div class="summary-item" x-show="sel && (Array.isArray(sel) ? sel.length : true)">
+                                <span class="summary-key" x-text="key + ':'"></span>
+                                <span class="summary-val" x-text="Array.isArray(sel) ? sel.join(', ') : sel"></span>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Step Content -->
+                    <div class="builder-step-content">
+                        <div class="step-header">
+                            <div class="step-icon">
+                                <span class="material-icons" x-text="getStepIcon(currentStep?.id)"></span>
+                            </div>
+                            <h2 class="step-title" x-text="currentStep ? currentStep.id : ''"></h2>
+                            <p class="step-hint" x-text="currentStep?.multi ? (sandwichTiers[currentBuild.tier]?.limits[currentStep.id] + ' selections allowed') : 'Select one'"></p>
+                        </div>
+
+                        <div class="options-grid">
+                            <template x-if="currentStep">
+                                <template x-for="option in currentStep.options" :key="option">
+                                    <div class="option-card"
+                                         :class="{'selected': isSelected(currentStep.id, option), 'disabled': isOptionDisabled(currentStep.id, option)}"
+                                         @click="selectOption(currentStep.id, option, currentStep.multi)">
+                                        <span class="option-name" x-text="option"></span>
+                                        <span class="option-check material-icons" x-show="isSelected(currentStep.id, option)">check_circle</span>
+                                    </div>
+                                </template>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Action -->
+                    <div class="builder-footer">
+                        <button class="btn btn-builder-next w-100 py-3 fw-bold" @click="nextStep()" x-text="builderStep === totalSteps ? 'Add to Basket' : 'Next Step'"></button>
+                    </div>
+                </div>
+            </template>
+
+            <!-- CART VIEW -->
+            <template x-if="view === 'cart'">
+                <div class="p-4 view-enter">
+                    <h2 class="fw-bolder text-white mb-4 text-uppercase border-bottom border-danger pb-2">Your Order</h2>
+
+                    <template x-if="cart.length === 0">
+                        <div class="text-center py-5 my-5">
+                            <div class="empty-icon">
+                                <span class="material-icons">shopping_basket</span>
+                            </div>
+                            <h4 class="text-white fw-bold mt-4">Your basket is empty</h4>
+                            <p class="text-white-50">Add some delicious items from our menu</p>
+                            <button class="btn btn-hero mt-3 px-4 py-2 fw-bold" @click="isDrawerOpen = true">
+                                <span class="material-icons me-2" style="font-size:1rem; vertical-align: middle;">restaurant_menu</span>
+                                Browse Menu
+                            </button>
+                        </div>
+                    </template>
+
+                    <template x-if="cart.length > 0">
+                        <div>
+                            <template x-for="(item, index) in cart" :key="index">
+                                <div class="tuckinn-card p-4 mb-3 position-relative border-start border-danger border-4">
+                                    <span class="material-icons text-white position-absolute top-0 end-0 m-3" style="cursor:pointer; font-size:20px;" @click="removeFromCart(index)">close</span>
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <h6 class="fw-bold text-white m-0 fs-5 lh-sm pe-2" x-text="item.name"></h6>
+                                        <span class="text-danger fw-bolder fs-5" x-text="'€' + (parseFloat(item.price) * (item.quantity || 1)).toFixed(2)"></span>
+                                    </div>
+                                    <p class="text-white-50 small mb-2" x-text="formatSelections(item)"></p>
+                                    <div class="qty-control mt-2">
+                                        <button class="qty-btn" @click="qtyDecrease(index)" :disabled="item.quantity === 1">
+                                            <span class="material-icons" style="font-size:1rem;">remove</span>
+                                        </button>
+                                        <span class="qty-value" x-text="item.quantity || 1"></span>
+                                        <button class="qty-btn" @click="qtyIncrease(index)">
+                                            <span class="material-icons" style="font-size:1rem;">add</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Order Type Toggle -->
+                            <div class="order-type-toggle mb-4" x-show="cart.length > 0">
+                                <p class="text-white small fw-bold mb-2">Order Type</p>
+                                <div class="toggle-container">
+                                    <div class="toggle-track" :class="{'instore': orderType === 'instore'}">
+                                        <div class="toggle-thumb"></div>
+                                        <button class="toggle-option" :class="{'active': orderType === 'collect'}" @click="orderType = 'collect'" type="button">
+                                            <span class="material-icons" style="font-size:1.2rem;">local_shipping</span>
+                                            <span>Collect</span>
+                                        </button>
+                                        <button class="toggle-option" :class="{'active': orderType === 'instore'}" @click="orderType = 'instore'" type="button">
+                                            <span class="material-icons" style="font-size:1.2rem;">restaurant</span>
+                                            <span>Dine In</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Customer Details -->
+                            <div class="tuckinn-card p-3 mb-3">
+                                <div class="form-group">
+                                    <input type="text" x-model="checkoutForm.address" class="form-control" placeholder="Your Name" required>
+                                </div>
+                                <div class="form-group" x-show="orderType === 'collect'">
+                                    <input type="tel" x-model="checkoutForm.phone" class="form-control" placeholder="Phone Number">
+                                </div>
+                            </div>
+
+                            <!-- Special Instructions -->
+                            <div class="form-group">
+                                <textarea x-model="specialInstructions" class="form-control" rows="2" placeholder="Special Instructions (allergies, special requests...)"></textarea>
+                            </div>
+
+                            <!-- Order Summary -->
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <span class="text-white fs-4 fw-bold">Total</span>
+                                <span class="text-danger fs-1 fw-bolder" x-text="'€' + cartTotal"></span>
+                            </div>
+                            <button class="btn btn-success w-100 py-3 fw-bolder fs-4 shadow-lg text-uppercase" @click="processOrder()">Place Order</button>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- SUCCESS VIEW -->
+            <template x-if="view === 'success'">
+                <div class="p-4 view-enter text-center">
+                    <div class="success-animation">
+                        <div class="success-checkmark">
+                            <span class="material-icons text-success">check_circle</span>
+                        </div>
+                        <div class="success-confetti">
+                            <span></span><span></span><span></span><span></span><span></span>
+                        </div>
+                    </div>
+                    <h2 class="text-white fw-bolder mb-1 success-title" x-text="'Thanks, ' + (orderSuccess?.customer_name || 'friend') + '!'"></h2>
+                    <p class="text-white-50 mb-2">Your order number is</p>
+                    <div class="order-number-badge">
+                        <span class="text-danger fw-bolder fs-2" x-text="orderSuccess?.order_number"></span>
+                    </div>
+                    <div class="success-info mt-4 p-3 rounded">
+                        <div class="success-type">
+                            <span class="material-icons text-warning fs-2" x-text="orderSuccess?.order_type === 'instore' ? 'restaurant' : 'local_shipping'"></span>
+                            <p class="text-warning fw-bold mb-0 mt-2" x-text="orderSuccess?.order_type === 'instore' ? 'DINE IN' : 'COLLECTION'"></p>
+                        </div>
+                        <p class="text-white-50 small mb-0 mt-2" x-text="orderSuccess?.order_type === 'instore' ? 'We\'ll call your name when ready!' : 'We\'ll text when ready for pickup!'"></p>
+                    </div>
+                    <div class="success-order-items mt-4">
+                        <template x-for="item in orderSuccess?.items" :key="item.name">
+                            <div class="success-item">
+                                <span class="text-white" x-text="item.name"></span>
+                                <span class="text-danger" x-text="'€' + item.price.toFixed(2)"></span>
+                            </div>
+                        </template>
+                        <div class="success-total">
+                            <span class="text-white fw-bold">Total</span>
+                            <span class="text-danger fw-bold" x-text="'€' + orderSuccess?.total"></span>
+                        </div>
+                    </div>
+                    <button class="btn btn-hero mt-4 px-5 py-3 fw-bold" @click="view = 'home'">Back to Menu</button>
+                </div>
+            </template>
+            
+            <!-- ACCOUNT VIEW -->
+            <template x-if="view === 'account'">
+                <div class="p-4 view-enter text-center mt-5">
+                    <span class="material-icons text-danger mb-4" style="font-size: 80px;">admin_panel_settings</span>
+                    <h2 class="text-white fw-bolder text-uppercase">VIP Access</h2>
+                    <p class="text-white fs-5">Secure Area</p>
+                </div>
+            </template>
+            
+        </main>
+
+        <!-- BOTTOM NAV -->
+        <nav class="bottom-nav">
+            <div class="nav-item" :class="{'active text-danger': view === 'home'}" @click="view = 'home'"><i class="material-icons fs-2">home</i></div>
+            <div class="nav-item" :class="{'active text-danger': view === 'full-menu' || isDrawerOpen}" @click="isDrawerOpen = true"><i class="material-icons fs-2">restaurant_menu</i></div>
+            <div class="nav-item position-relative" :class="{'active text-danger': view === 'cart'}" @click="view = 'cart'">
+                <i class="material-icons fs-2">shopping_bag</i>
+                <span x-show="cart.length > 0" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger border border-dark" x-text="cart.length" style="font-size: 12px; margin-top: 5px; margin-left: -10px;"></span>
+            </div>
+        </nav>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" x-show="toasts.length > 0" x-transition>
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="toast-item" :class="'toast-' + toast.type">
+                <span class="material-icons" x-text="toast.type === 'success' ? 'check_circle' : toast.type === 'error' ? 'error' : 'info'"></span>
+                <span x-text="toast.message"></span>
+            </div>
+        </template>
+    </div>
+</body>
+</html>
