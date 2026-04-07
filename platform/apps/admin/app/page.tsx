@@ -26,8 +26,11 @@ type Product = {
   name: string;
   shortDescription?: string | null;
   longDescription?: string | null;
+  imageUrl?: string | null;
+  imageAltText?: string | null;
   isFeatured?: boolean;
   sortOrder?: number;
+  status?: "draft" | "active" | "archived";
   category?: { id: string; name: string } | null;
   variants: Array<{ id: string; name: string; priceAmount: number | string; sku?: string | null }>;
   modifierGroups?: Array<{
@@ -94,6 +97,8 @@ export default function AdminHomePage() {
     name: "",
     shortDescription: "",
     longDescription: "",
+    imageUrl: "",
+    imageAltText: "",
     isFeatured: false,
     sortOrder: "0",
     sku: "",
@@ -140,7 +145,11 @@ export default function AdminHomePage() {
     name: "",
     shortDescription: "",
     longDescription: "",
+    imageUrl: "",
+    imageAltText: "",
+    clearImage: false,
     isFeatured: false,
+    status: "active",
     sortOrder: "0",
     sku: "",
     variantName: "Default",
@@ -293,7 +302,11 @@ export default function AdminHomePage() {
       name: product.name,
       shortDescription: product.shortDescription ?? "",
       longDescription: product.longDescription ?? "",
+      imageUrl: product.imageUrl ?? "",
+      imageAltText: product.imageAltText ?? "",
+      clearImage: false,
       isFeatured: product.isFeatured ?? false,
+      status: product.status ?? "active",
       sortOrder: String(product.sortOrder ?? 0),
       sku: defaultVariant?.sku ?? "",
       variantName: defaultVariant?.name ?? "Default",
@@ -482,6 +495,8 @@ export default function AdminHomePage() {
                             ...productForm,
                             slug: productForm.slug.trim(),
                             name: productForm.name.trim(),
+                            imageUrl: productForm.imageUrl || undefined,
+                            imageAltText: productForm.imageAltText || undefined,
                             priceAmount: Number(productForm.priceAmount)
                           })
                         },
@@ -495,6 +510,8 @@ export default function AdminHomePage() {
                     name: "",
                     shortDescription: "",
                     longDescription: "",
+                    imageUrl: "",
+                    imageAltText: "",
                     isFeatured: false,
                     sortOrder: "0",
                     sku: "",
@@ -519,6 +536,8 @@ export default function AdminHomePage() {
               <TextInput label="Name" value={productForm.name} onChange={value => setProductForm(current => ({ ...current, name: value }))} />
               <TextArea label="Short Description" value={productForm.shortDescription} onChange={value => setProductForm(current => ({ ...current, shortDescription: value }))} />
               <TextArea label="Long Description" value={productForm.longDescription} onChange={value => setProductForm(current => ({ ...current, longDescription: value }))} />
+              <TextInput label="Image URL" value={productForm.imageUrl} onChange={value => setProductForm(current => ({ ...current, imageUrl: value }))} />
+              <TextInput label="Image Alt Text" value={productForm.imageAltText} onChange={value => setProductForm(current => ({ ...current, imageAltText: value }))} />
               <TextInput label="Sort Order" value={productForm.sortOrder} onChange={value => setProductForm(current => ({ ...current, sortOrder: value }))} />
               <TextInput label="SKU" value={productForm.sku} onChange={value => setProductForm(current => ({ ...current, sku: value }))} />
               <TextInput label="Variant Name" value={productForm.variantName} onChange={value => setProductForm(current => ({ ...current, variantName: value }))} />
@@ -538,7 +557,7 @@ export default function AdminHomePage() {
                     <div>
                       <strong>{category.name}</strong>
                       <p style={styles.mutedText}>
-                        {category.slug} · Sort {category.sortOrder ?? 0} · {category.isVisible ? "Visible" : "Hidden"}
+                        {category.slug} | Sort {category.sortOrder ?? 0} | {category.isVisible ? "Visible" : "Hidden"}
                       </p>
                     </div>
                     <button style={styles.secondaryButton} onClick={() => beginCategoryEdit(category)}>
@@ -601,17 +620,113 @@ export default function AdminHomePage() {
                   <div style={styles.itemHeader}>
                     <div>
                       <strong>{product.name}</strong>
-                      <p style={styles.mutedText}>{product.category?.name || "Uncategorised"} · {product.slug}</p>
+                      <p style={styles.mutedText}>
+                        {product.category?.name || "Uncategorised"} | {product.slug} | {product.status ?? "active"}
+                      </p>
                       <p style={styles.mutedText}>
                         {product.variants
                           .map(variant => `${variant.name} ${formatCurrency(variant.priceAmount)}`)
                           .join(" - ")}
                       </p>
+                      {product.imageUrl ? (
+                        <img
+                          src={product.imageUrl}
+                          alt={product.imageAltText || product.name}
+                          style={styles.productImagePreview}
+                        />
+                      ) : null}
                     </div>
-                    <button style={styles.secondaryButton} onClick={() => beginProductEdit(product)}>
-                      Edit
-                    </button>
+                    <div style={styles.inlineActions}>
+                      <button style={styles.secondaryButton} onClick={() => beginProductEdit(product)}>
+                        Edit
+                      </button>
+                      {product.status === "archived" ? (
+                        <button
+                          style={styles.secondaryButton}
+                          onClick={() =>
+                            void withRefresh(async () => {
+                              await withAdminSession(
+                                session,
+                                accessToken =>
+                                  apiFetch(
+                                    `/catalog/products/${product.id}/restore`,
+                                    { method: "PATCH", body: JSON.stringify({}) },
+                                    accessToken
+                                  ),
+                                setSession
+                              );
+                            }, "Product restored.")
+                          }
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          style={styles.secondaryButton}
+                          onClick={() =>
+                            void withRefresh(async () => {
+                              await withAdminSession(
+                                session,
+                                accessToken =>
+                                  apiFetch(
+                                    `/catalog/products/${product.id}/archive`,
+                                    { method: "PATCH", body: JSON.stringify({}) },
+                                    accessToken
+                                  ),
+                                setSession
+                              );
+                            }, "Product archived.")
+                          }
+                        >
+                          Archive
+                        </button>
+                      )}
+                      <button
+                        style={styles.dangerButton}
+                        onClick={() => {
+                          if (!window.confirm(`Delete ${product.name}? This cannot be undone.`)) {
+                            return;
+                          }
+                          void withRefresh(async () => {
+                            await withAdminSession(
+                              session,
+                              accessToken =>
+                                apiFetch(`/catalog/products/${product.id}`, { method: "DELETE" }, accessToken),
+                              setSession
+                            );
+                          }, "Product deleted.");
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
+                  {product.modifierGroups?.length ? (
+                    <div style={styles.chipRow}>
+                      {product.modifierGroups.map(entry => (
+                        <button
+                          key={entry.modifierGroup.id}
+                          style={styles.chipButton}
+                          onClick={() =>
+                            void withRefresh(async () => {
+                              await withAdminSession(
+                                session,
+                                accessToken =>
+                                  apiFetch(
+                                    `/modifiers/products/${product.id}/groups/${entry.modifierGroup.id}`,
+                                    { method: "DELETE" },
+                                    accessToken
+                                  ),
+                                setSession
+                              );
+                            }, `Removed ${entry.modifierGroup.name} from ${product.name}.`)
+                          }
+                        >
+                          Remove {entry.modifierGroup.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   {editingProductId === product.id ? (
                     <form
                       style={styles.form}
@@ -631,7 +746,13 @@ export default function AdminHomePage() {
                                     name: productEditForm.name.trim(),
                                     shortDescription: productEditForm.shortDescription || undefined,
                                     longDescription: productEditForm.longDescription || undefined,
+                                    imageUrl: productEditForm.clearImage
+                                      ? undefined
+                                      : productEditForm.imageUrl || undefined,
+                                    imageAltText: productEditForm.imageAltText || undefined,
+                                    clearImage: productEditForm.clearImage,
                                     isFeatured: productEditForm.isFeatured,
+                                    status: productEditForm.status,
                                     sortOrder: Number(productEditForm.sortOrder),
                                     sku: productEditForm.sku || undefined,
                                     variantName: productEditForm.variantName,
@@ -662,6 +783,24 @@ export default function AdminHomePage() {
                       <TextInput label="Name" value={productEditForm.name} onChange={value => setProductEditForm(current => ({ ...current, name: value }))} />
                       <TextArea label="Short Description" value={productEditForm.shortDescription} onChange={value => setProductEditForm(current => ({ ...current, shortDescription: value }))} />
                       <TextArea label="Long Description" value={productEditForm.longDescription} onChange={value => setProductEditForm(current => ({ ...current, longDescription: value }))} />
+                      <TextInput label="Image URL" value={productEditForm.imageUrl} onChange={value => setProductEditForm(current => ({ ...current, imageUrl: value, clearImage: false }))} />
+                      <TextInput label="Image Alt Text" value={productEditForm.imageAltText} onChange={value => setProductEditForm(current => ({ ...current, imageAltText: value }))} />
+                      <CheckboxInput label="Clear current image" checked={productEditForm.clearImage} onChange={checked => setProductEditForm(current => ({ ...current, clearImage: checked }))} />
+                      <SelectInput
+                        label="Status"
+                        value={productEditForm.status}
+                        onChange={value =>
+                          setProductEditForm(current => ({
+                            ...current,
+                            status: value as "draft" | "active" | "archived"
+                          }))
+                        }
+                        options={[
+                          { value: "active", label: "Active" },
+                          { value: "draft", label: "Draft" },
+                          { value: "archived", label: "Archived" }
+                        ]}
+                      />
                       <TextInput label="Sort Order" value={productEditForm.sortOrder} onChange={value => setProductEditForm(current => ({ ...current, sortOrder: value }))} />
                       <TextInput label="SKU" value={productEditForm.sku} onChange={value => setProductEditForm(current => ({ ...current, sku: value }))} />
                       <TextInput label="Variant Name" value={productEditForm.variantName} onChange={value => setProductEditForm(current => ({ ...current, variantName: value }))} />
@@ -861,7 +1000,7 @@ export default function AdminHomePage() {
                     <div>
                       <strong>{group.name}</strong>
                       <p style={styles.mutedText}>
-                        Min {group.minSelect ?? 0} · Max {group.maxSelect ?? 1} · Sort {group.sortOrder ?? 0} · {group.isRequired ? "Required" : "Optional"}
+                        Min {group.minSelect ?? 0} | Max {group.maxSelect ?? 1} | Sort {group.sortOrder ?? 0} | {group.isRequired ? "Required" : "Optional"}
                       </p>
                       <p style={styles.mutedText}>
                         Applied to:{" "}
@@ -926,7 +1065,7 @@ export default function AdminHomePage() {
                         <div>
                           <strong>{option.name}</strong>
                           <p style={styles.mutedText}>
-                            {formatCurrency(option.priceDeltaAmount)} · Sort {option.sortOrder ?? 0} · {option.isActive ? "Active" : "Inactive"}{option.isDefault ? " · Default" : ""}
+                            {formatCurrency(option.priceDeltaAmount)} | Sort {option.sortOrder ?? 0} | {option.isActive ? "Active" : "Inactive"}{option.isDefault ? " | Default" : ""}
                           </p>
                         </div>
                         <button style={styles.secondaryButton} onClick={() => beginOptionEdit(group.id, option)}>
@@ -1186,6 +1325,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#f6eee6",
     padding: "12px 15px"
   },
+  dangerButton: {
+    borderRadius: 14,
+    border: "1px solid rgba(255,107,107,0.35)",
+    background: "rgba(146,31,31,0.22)",
+    color: "#ffd2d2",
+    padding: "12px 15px"
+  },
   error: {
     color: "#ff9d93",
     margin: "0 0 16px"
@@ -1275,6 +1421,27 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     gap: 10,
     flexWrap: "wrap"
+  },
+  chipRow: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    marginBottom: 12
+  },
+  chipButton: {
+    borderRadius: 999,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.04)",
+    color: "#f6eee6",
+    padding: "8px 12px"
+  },
+  productImagePreview: {
+    width: 120,
+    height: 120,
+    objectFit: "cover",
+    borderRadius: 16,
+    marginTop: 10,
+    border: "1px solid rgba(255,255,255,0.08)"
   },
   optionList: {
     display: "grid",

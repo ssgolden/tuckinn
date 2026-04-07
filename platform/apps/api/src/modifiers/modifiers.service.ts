@@ -277,4 +277,32 @@ export class ModifiersService {
       }
     });
   }
+
+  async detachGroupFromProduct(productId: string, modifierGroupId: string) {
+    await this.prisma.productModifierGroup.deleteMany({
+      where: {
+        productId,
+        modifierGroupId
+      }
+    });
+
+    return this.prisma.product.findUniqueOrThrow({
+      where: { id: productId },
+      include: {
+        modifierGroups: {
+          include: {
+            modifierGroup: {
+              include: {
+                options: {
+                  where: { isActive: true },
+                  orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+                }
+              }
+            }
+          },
+          orderBy: [{ sortOrder: "asc" }]
+        }
+      }
+    });
+  }
 }

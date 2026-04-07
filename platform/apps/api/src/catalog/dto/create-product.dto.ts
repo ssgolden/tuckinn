@@ -34,6 +34,14 @@ export class CreateProductDto {
   longDescription?: string;
 
   @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  imageAltText?: string;
+
+  @IsOptional()
   @IsBoolean()
   isFeatured?: boolean;
 

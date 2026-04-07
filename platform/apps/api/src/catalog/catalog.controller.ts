@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -9,6 +10,7 @@ import {
   UseGuards
 } from "@nestjs/common";
 import { RoleCode } from "../../src/generated/prisma/index.js";
+import { ProductStatus } from "../../src/generated/prisma/index.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../rbac/roles.decorator";
 import { RolesGuard } from "../rbac/roles.guard";
@@ -70,5 +72,26 @@ export class CatalogController {
   @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
   updateProduct(@Param("productId") productId: string, @Body() dto: UpdateProductDto) {
     return this.catalogService.updateProduct(productId, dto);
+  }
+
+  @Patch("products/:productId/archive")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  archiveProduct(@Param("productId") productId: string) {
+    return this.catalogService.setProductStatus(productId, ProductStatus.archived);
+  }
+
+  @Patch("products/:productId/restore")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  restoreProduct(@Param("productId") productId: string) {
+    return this.catalogService.setProductStatus(productId, ProductStatus.active);
+  }
+
+  @Delete("products/:productId")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  deleteProduct(@Param("productId") productId: string) {
+    return this.catalogService.deleteProduct(productId);
   }
 }

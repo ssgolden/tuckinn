@@ -1,4 +1,5 @@
 import {
+  IsEnum,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -7,6 +8,7 @@ import {
   Min,
   MinLength
 } from "class-validator";
+import { ProductStatus } from "../../../src/generated/prisma/index.js";
 
 export class UpdateProductDto {
   @IsOptional()
@@ -33,8 +35,24 @@ export class UpdateProductDto {
   longDescription?: string;
 
   @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  imageAltText?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  clearImage?: boolean;
+
+  @IsOptional()
   @IsBoolean()
   isFeatured?: boolean;
+
+  @IsOptional()
+  @IsEnum(ProductStatus)
+  status?: ProductStatus;
 
   @IsOptional()
   @IsInt()

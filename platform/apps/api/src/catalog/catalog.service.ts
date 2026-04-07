@@ -21,30 +21,31 @@ export class CatalogService {
           where: { isVisible: true },
           orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
           include: {
-        products: {
-          where: { status: ProductStatus.active },
-          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-          include: {
-            variants: {
-              where: { isActive: true },
-              orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
-            },
-            modifierGroups: {
-              orderBy: [{ sortOrder: "asc" }],
+            products: {
+              where: { status: ProductStatus.active },
+              orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
               include: {
-                modifierGroup: {
+                imageAsset: true,
+                variants: {
+                  where: { isActive: true },
+                  orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
+                },
+                modifierGroups: {
+                  orderBy: [{ sortOrder: "asc" }],
                   include: {
-                    options: {
-                      where: { isActive: true },
-                      orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+                    modifierGroup: {
+                      include: {
+                        options: {
+                          where: { isActive: true },
+                          orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+                        }
+                      }
                     }
                   }
                 }
               }
             }
           }
-        }
-      }
         }
       }
     });
@@ -68,12 +69,17 @@ export class CatalogService {
           slug: product.slug,
           name: product.name,
           shortDescription: product.shortDescription,
+          longDescription: product.longDescription,
+          imageUrl: product.imageAsset?.url ?? null,
+          imageAltText: product.imageAsset?.altText ?? null,
           isFeatured: product.isFeatured,
+          status: product.status,
           variants: product.variants.map(variant => ({
             id: variant.id,
             name: variant.name,
             priceAmount: Number(variant.priceAmount),
-            isDefault: variant.isDefault
+            isDefault: variant.isDefault,
+            sku: variant.sku
           })),
           modifierGroups: product.modifierGroups.map(entry => ({
             id: entry.modifierGroup.id,
@@ -109,7 +115,7 @@ export class CatalogService {
   }
 
   async listProducts(locationCode?: string, categorySlug?: string) {
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         ...(locationCode
           ? {
@@ -128,6 +134,7 @@ export class CatalogService {
       },
       include: {
         category: true,
+        imageAsset: true,
         variants: {
           orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
         },
@@ -146,6 +153,41 @@ export class CatalogService {
       },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
     });
+
+    return products.map(product => ({
+      id: product.id,
+      slug: product.slug,
+      name: product.name,
+      shortDescription: product.shortDescription,
+      longDescription: product.longDescription,
+      imageUrl: product.imageAsset?.url ?? null,
+      imageAltText: product.imageAsset?.altText ?? null,
+      isFeatured: product.isFeatured,
+      sortOrder: product.sortOrder,
+      status: product.status,
+      category: product.category
+        ? {
+            id: product.category.id,
+            name: product.category.name
+          }
+        : null,
+      variants: product.variants.map(variant => ({
+        id: variant.id,
+        name: variant.name,
+        priceAmount: Number(variant.priceAmount),
+        sku: variant.sku
+      })),
+      modifierGroups: product.modifierGroups.map(entry => ({
+        modifierGroup: {
+          id: entry.modifierGroup.id,
+          name: entry.modifierGroup.name,
+          options: entry.modifierGroup.options.map(option => ({
+            id: option.id,
+            name: option.name
+          }))
+        }
+      }))
+    }));
   }
 
   async createCategory(dto: CreateCategoryDto) {
@@ -278,10 +320,16 @@ export class CatalogService {
       });
     }
 
+    await this.syncProductImage(product.id, {
+      imageUrl: dto.imageUrl,
+      imageAltText: dto.imageAltText
+    });
+
     return this.prisma.product.findUniqueOrThrow({
       where: { id: product.id },
       include: {
         category: true,
+        imageAsset: true,
         variants: {
           orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
         },
@@ -340,7 +388,8 @@ export class CatalogService {
         shortDescription: dto.shortDescription ?? undefined,
         longDescription: dto.longDescription ?? undefined,
         isFeatured: dto.isFeatured ?? undefined,
-        sortOrder: dto.sortOrder ?? undefined
+        sortOrder: dto.sortOrder ?? undefined,
+        status: dto.status ?? undefined
       }
     });
 
@@ -365,10 +414,13 @@ export class CatalogService {
       });
     }
 
+    await this.syncProductImage(productId, dto);
+
     return this.prisma.product.findUniqueOrThrow({
       where: { id: productId },
       include: {
         category: true,
+        imageAsset: true,
         variants: {
           orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
         },
@@ -386,5 +438,102 @@ export class CatalogService {
         }
       }
     });
+  }
+
+  async setProductStatus(productId: string, status: ProductStatus) {
+    await this.ensureProduct(productId);
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { status },
+      include: {
+        category: true,
+        imageAsset: true,
+        variants: {
+          orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
+        },
+        modifierGroups: {
+          include: {
+            modifierGroup: {
+              include: {
+                options: {
+                  orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+                }
+              }
+            }
+          },
+          orderBy: [{ sortOrder: "asc" }]
+        }
+      }
+    });
+  }
+
+  async deleteProduct(productId: string) {
+    await this.ensureProduct(productId);
+    await this.prisma.product.delete({
+      where: { id: productId }
+    });
+    return { success: true };
+  }
+
+  private async ensureProduct(productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId }
+    });
+
+    if (!product) {
+      throw new NotFoundException("Product not found.");
+    }
+
+    return product;
+  }
+
+  private async syncProductImage(
+    productId: string,
+    dto: Pick<UpdateProductDto, "imageUrl" | "imageAltText" | "clearImage">
+  ) {
+    if (dto.clearImage) {
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: {
+          imageAssetId: null
+        }
+      });
+      return;
+    }
+
+    if (!dto.imageUrl) {
+      return;
+    }
+
+    const storageKey = `product:${productId}:primary`;
+    const asset = await this.prisma.mediaAsset.upsert({
+      where: { storageKey },
+      update: {
+        url: dto.imageUrl,
+        altText: dto.imageAltText ?? undefined,
+        mimeType: this.inferMimeType(dto.imageUrl)
+      },
+      create: {
+        storageKey,
+        url: dto.imageUrl,
+        altText: dto.imageAltText ?? undefined,
+        mimeType: this.inferMimeType(dto.imageUrl)
+      }
+    });
+
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: {
+        imageAssetId: asset.id
+      }
+    });
+  }
+
+  private inferMimeType(url: string) {
+    const normalized = url.toLowerCase();
+    if (normalized.endsWith(".png")) return "image/png";
+    if (normalized.endsWith(".webp")) return "image/webp";
+    if (normalized.endsWith(".gif")) return "image/gif";
+    return "image/jpeg";
   }
 }

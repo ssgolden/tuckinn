@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -64,5 +65,14 @@ export class ModifiersController {
   @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
   attachGroupToProduct(@Body() dto: AttachModifierGroupDto) {
     return this.modifiersService.attachGroupToProduct(dto);
+  }
+
+  @Delete("products/:productId/groups/:modifierGroupId")
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  detachGroupFromProduct(
+    @Param("productId") productId: string,
+    @Param("modifierGroupId") modifierGroupId: string
+  ) {
+    return this.modifiersService.detachGroupFromProduct(productId, modifierGroupId);
   }
 }
