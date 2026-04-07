@@ -74,6 +74,8 @@ services:
       - ../../.env.production
     environment:
       PORT: 3200
+    volumes:
+      - api_uploads:/app/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -166,6 +168,7 @@ services:
       - internal
 
 volumes:
+  api_uploads:
   postgres_data:
   redis_data:
   caddy_data:

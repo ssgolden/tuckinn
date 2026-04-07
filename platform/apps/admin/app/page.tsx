@@ -7,6 +7,7 @@ import {
   logoutAdminSession,
   restoreAdminSession,
   saveAdminSession,
+  uploadAdminMedia,
   withAdminSession,
   type AdminSession
 } from "../lib/api";
@@ -171,6 +172,7 @@ export default function AdminHomePage() {
     isDefault: false,
     isActive: true
   });
+  const [uploadingImageTarget, setUploadingImageTarget] = useState<"create" | "edit" | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -340,6 +342,51 @@ export default function AdminHomePage() {
       modifierGroupId: groupId
     }));
     setEditingOptionId(option.id);
+  }
+
+  async function handleCreateImageUpload(file: File) {
+    if (!session) {
+      return;
+    }
+
+    try {
+      setUploadingImageTarget("create");
+      setError(null);
+      const asset = await uploadAdminMedia(file, session, setSession);
+      setProductForm(current => ({
+        ...current,
+        imageUrl: asset.url,
+        imageAltText: current.imageAltText || file.name.replace(/\.[^.]+$/, "")
+      }));
+      setSuccess("Product image uploaded.");
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Image upload failed.");
+    } finally {
+      setUploadingImageTarget(null);
+    }
+  }
+
+  async function handleEditImageUpload(file: File) {
+    if (!session) {
+      return;
+    }
+
+    try {
+      setUploadingImageTarget("edit");
+      setError(null);
+      const asset = await uploadAdminMedia(file, session, setSession);
+      setProductEditForm(current => ({
+        ...current,
+        imageUrl: asset.url,
+        imageAltText: current.imageAltText || file.name.replace(/\.[^.]+$/, ""),
+        clearImage: false
+      }));
+      setSuccess("Product image uploaded.");
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Image upload failed.");
+    } finally {
+      setUploadingImageTarget(null);
+    }
   }
 
   if (isBootstrapping) {
@@ -538,6 +585,10 @@ export default function AdminHomePage() {
               <TextArea label="Long Description" value={productForm.longDescription} onChange={value => setProductForm(current => ({ ...current, longDescription: value }))} />
               <TextInput label="Image URL" value={productForm.imageUrl} onChange={value => setProductForm(current => ({ ...current, imageUrl: value }))} />
               <TextInput label="Image Alt Text" value={productForm.imageAltText} onChange={value => setProductForm(current => ({ ...current, imageAltText: value }))} />
+              <FileInput
+                label={uploadingImageTarget === "create" ? "Uploading image..." : "Upload image from device"}
+                onChange={file => void handleCreateImageUpload(file)}
+              />
               <TextInput label="Sort Order" value={productForm.sortOrder} onChange={value => setProductForm(current => ({ ...current, sortOrder: value }))} />
               <TextInput label="SKU" value={productForm.sku} onChange={value => setProductForm(current => ({ ...current, sku: value }))} />
               <TextInput label="Variant Name" value={productForm.variantName} onChange={value => setProductForm(current => ({ ...current, variantName: value }))} />
@@ -785,6 +836,10 @@ export default function AdminHomePage() {
                       <TextArea label="Long Description" value={productEditForm.longDescription} onChange={value => setProductEditForm(current => ({ ...current, longDescription: value }))} />
                       <TextInput label="Image URL" value={productEditForm.imageUrl} onChange={value => setProductEditForm(current => ({ ...current, imageUrl: value, clearImage: false }))} />
                       <TextInput label="Image Alt Text" value={productEditForm.imageAltText} onChange={value => setProductEditForm(current => ({ ...current, imageAltText: value }))} />
+                      <FileInput
+                        label={uploadingImageTarget === "edit" ? "Uploading image..." : "Upload image from device"}
+                        onChange={file => void handleEditImageUpload(file)}
+                      />
                       <CheckboxInput label="Clear current image" checked={productEditForm.clearImage} onChange={checked => setProductEditForm(current => ({ ...current, clearImage: checked }))} />
                       <SelectInput
                         label="Status"
@@ -1230,6 +1285,32 @@ function CheckboxInput({
     <label style={styles.checkboxLabel}>
       <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />
       {label}
+    </label>
+  );
+}
+
+function FileInput({
+  label,
+  onChange
+}: {
+  label: string;
+  onChange: (file: File) => void;
+}) {
+  return (
+    <label style={styles.label}>
+      {label}
+      <input
+        style={styles.input}
+        type="file"
+        accept="image/*"
+        onChange={event => {
+          const file = event.target.files?.[0];
+          if (file) {
+            onChange(file);
+          }
+          event.currentTarget.value = "";
+        }}
+      />
     </label>
   );
 }

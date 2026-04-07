@@ -1,5 +1,8 @@
 import { ValidationPipe } from "@nestjs/common";
+import express from "express";
 import { NestFactory } from "@nestjs/core";
+import { existsSync, mkdirSync } from "fs";
+import { join } from "path";
 import type { Request, Response } from "express";
 import { AppModule } from "./app.module";
 
@@ -12,6 +15,13 @@ async function bootstrap() {
     .map(origin => origin.trim())
     .filter(Boolean);
   const expressApp = app.getHttpAdapter().getInstance();
+  const uploadRoot = join(process.cwd(), "data", "uploads");
+
+  if (!existsSync(uploadRoot)) {
+    mkdirSync(uploadRoot, { recursive: true });
+  }
+
+  expressApp.use("/uploads", express.static(uploadRoot));
 
   expressApp.get("/", (_request: Request, response: Response) => {
     response.json({

@@ -22,6 +22,14 @@ export type AdminSession = {
   };
 };
 
+export type UploadedMediaAsset = {
+  id: string;
+  url: string;
+  altText?: string | null;
+  mimeType: string;
+  fileSizeBytes: number;
+};
+
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
@@ -55,6 +63,43 @@ export async function apiFetch<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function uploadAdminMedia(
+  file: File,
+  session: AdminSession,
+  onSessionRefresh: (nextSession: AdminSession) => void
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const upload = async (accessToken: string) => {
+    const response = await fetch(`${API_BASE_URL}/media/upload`, {
+      method: "POST",
+      body: formData,
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    });
+
+    if (!response.ok) {
+      let message = `${response.status} ${response.statusText}`;
+      try {
+        const payload = await response.json();
+        message = payload.message || payload.error || message;
+      } catch {
+        const text = await response.text();
+        if (text) {
+          message = text;
+        }
+      }
+      throw new ApiError(message, response.status);
+    }
+
+    return response.json() as Promise<UploadedMediaAsset>;
+  };
+
+  return withAdminSession(session, upload, onSessionRefresh);
 }
 
 export function saveAdminSession(session: AdminSession) {
