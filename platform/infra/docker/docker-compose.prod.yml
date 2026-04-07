@@ -95,7 +95,7 @@ services:
     profiles: ["tools"]
     env_file:
       - ../../.env.production
-    command: ["pnpm", "--filter", "@tuckinn/api", "prisma:seed"]
+    command: ["./node_modules/.bin/tsx", "./prisma/seed.ts"]
     depends_on:
       postgres:
         condition: service_healthy
