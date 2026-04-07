@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  Param,
+  Patch,
   Post,
   Query,
   UseGuards
@@ -13,6 +15,8 @@ import { RolesGuard } from "../rbac/roles.guard";
 import { CatalogService } from "./catalog.service";
 import { CreateCategoryDto } from "./dto/create-category.dto";
 import { CreateProductDto } from "./dto/create-product.dto";
+import { UpdateCategoryDto } from "./dto/update-category.dto";
+import { UpdateProductDto } from "./dto/update-product.dto";
 
 @Controller("catalog")
 export class CatalogController {
@@ -47,10 +51,24 @@ export class CatalogController {
     return this.catalogService.createCategory(dto);
   }
 
+  @Patch("categories/:categoryId")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  updateCategory(@Param("categoryId") categoryId: string, @Body() dto: UpdateCategoryDto) {
+    return this.catalogService.updateCategory(categoryId, dto);
+  }
+
   @Post("products")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
   createProduct(@Body() dto: CreateProductDto) {
     return this.catalogService.createProduct(dto);
+  }
+
+  @Patch("products/:productId")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  updateProduct(@Param("productId") productId: string, @Body() dto: UpdateProductDto) {
+    return this.catalogService.updateProduct(productId, dto);
   }
 }

@@ -6,6 +6,8 @@ import { ProductStatus } from "../../src/generated/prisma/index.js";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateCategoryDto } from "./dto/create-category.dto";
 import { CreateProductDto } from "./dto/create-product.dto";
+import { UpdateCategoryDto } from "./dto/update-category.dto";
+import { UpdateProductDto } from "./dto/update-product.dto";
 
 @Injectable()
 export class CatalogService {
@@ -179,6 +181,27 @@ export class CatalogService {
     });
   }
 
+  async updateCategory(categoryId: string, dto: UpdateCategoryDto) {
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId }
+    });
+
+    if (!category) {
+      throw new NotFoundException("Category not found.");
+    }
+
+    return this.prisma.category.update({
+      where: { id: categoryId },
+      data: {
+        slug: dto.slug ?? undefined,
+        name: dto.name ?? undefined,
+        description: dto.description ?? undefined,
+        sortOrder: dto.sortOrder ?? undefined,
+        isVisible: dto.isVisible ?? undefined
+      }
+    });
+  }
+
   async createProduct(dto: CreateProductDto) {
     const productContext = await this.prisma.category.findFirst({
       where: {
@@ -257,6 +280,93 @@ export class CatalogService {
 
     return this.prisma.product.findUniqueOrThrow({
       where: { id: product.id },
+      include: {
+        category: true,
+        variants: {
+          orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
+        },
+        modifierGroups: {
+          include: {
+            modifierGroup: {
+              include: {
+                options: {
+                  orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+                }
+              }
+            }
+          },
+          orderBy: [{ sortOrder: "asc" }]
+        }
+      }
+    });
+  }
+
+  async updateProduct(productId: string, dto: UpdateProductDto) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        variants: {
+          orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
+        }
+      }
+    });
+
+    if (!product) {
+      throw new NotFoundException("Product not found.");
+    }
+
+    let categoryId: string | undefined;
+    if (dto.categorySlug) {
+      const category = await this.prisma.category.findFirst({
+        where: {
+          slug: dto.categorySlug,
+          locationId: product.locationId ?? undefined
+        }
+      });
+
+      if (!category) {
+        throw new NotFoundException("Category not found.");
+      }
+
+      categoryId = category.id;
+    }
+
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: {
+        categoryId,
+        slug: dto.slug ?? undefined,
+        name: dto.name ?? undefined,
+        shortDescription: dto.shortDescription ?? undefined,
+        longDescription: dto.longDescription ?? undefined,
+        isFeatured: dto.isFeatured ?? undefined,
+        sortOrder: dto.sortOrder ?? undefined
+      }
+    });
+
+    if (
+      dto.variantName !== undefined ||
+      dto.priceAmount !== undefined ||
+      dto.sku !== undefined
+    ) {
+      const defaultVariant = product.variants.find(variant => variant.isDefault) ?? product.variants[0];
+
+      if (!defaultVariant) {
+        throw new NotFoundException("Product variant not found.");
+      }
+
+      await this.prisma.productVariant.update({
+        where: { id: defaultVariant.id },
+        data: {
+          name: dto.variantName ?? undefined,
+          priceAmount: dto.priceAmount ?? undefined,
+          sku: dto.sku ?? undefined
+        }
+      });
+    }
+
+    return this.prisma.product.findUniqueOrThrow({
+      where: { id: productId },
       include: {
         category: true,
         variants: {

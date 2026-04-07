@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  Param,
+  Patch,
   Post,
   Query,
   UseGuards
@@ -14,6 +16,8 @@ import { AttachModifierGroupDto } from "./dto/attach-modifier-group.dto";
 import { CreateModifierGroupDto } from "./dto/create-modifier-group.dto";
 import { CreateModifierOptionDto } from "./dto/create-modifier-option.dto";
 import { ModifiersService } from "./modifiers.service";
+import { UpdateModifierGroupDto } from "./dto/update-modifier-group.dto";
+import { UpdateModifierOptionDto } from "./dto/update-modifier-option.dto";
 
 @Controller("modifiers")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -32,10 +36,28 @@ export class ModifiersController {
     return this.modifiersService.createModifierGroup(dto);
   }
 
+  @Patch("groups/:modifierGroupId")
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  updateModifierGroup(
+    @Param("modifierGroupId") modifierGroupId: string,
+    @Body() dto: UpdateModifierGroupDto
+  ) {
+    return this.modifiersService.updateModifierGroup(modifierGroupId, dto);
+  }
+
   @Post("options")
   @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
   createModifierOption(@Body() dto: CreateModifierOptionDto) {
     return this.modifiersService.createModifierOption(dto);
+  }
+
+  @Patch("options/:modifierOptionId")
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  updateModifierOption(
+    @Param("modifierOptionId") modifierOptionId: string,
+    @Body() dto: UpdateModifierOptionDto
+  ) {
+    return this.modifiersService.updateModifierOption(modifierOptionId, dto);
   }
 
   @Post("attach")

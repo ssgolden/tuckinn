@@ -16,6 +16,8 @@ type Category = {
   slug: string;
   name: string;
   description?: string | null;
+  sortOrder?: number;
+  isVisible?: boolean;
 };
 
 type Product = {
@@ -23,8 +25,11 @@ type Product = {
   slug: string;
   name: string;
   shortDescription?: string | null;
+  longDescription?: string | null;
+  isFeatured?: boolean;
+  sortOrder?: number;
   category?: { id: string; name: string } | null;
-  variants: Array<{ id: string; name: string; priceAmount: number | string }>;
+  variants: Array<{ id: string; name: string; priceAmount: number | string; sku?: string | null }>;
   modifierGroups?: Array<{
     modifierGroup: {
       id: string;
@@ -38,7 +43,19 @@ type ModifierGroup = {
   id: string;
   name: string;
   description?: string | null;
-  options: Array<{ id: string; name: string; priceDeltaAmount: number | string }>;
+  minSelect?: number;
+  maxSelect?: number;
+  sortOrder?: number;
+  isRequired?: boolean;
+  options: Array<{
+    id: string;
+    name: string;
+    description?: string | null;
+    priceDeltaAmount: number | string;
+    sortOrder?: number;
+    isDefault?: boolean;
+    isActive?: boolean;
+  }>;
   products: Array<{ product: { id: string; slug: string; name: string } }>;
 };
 
@@ -66,7 +83,9 @@ export default function AdminHomePage() {
     locationCode: "main",
     slug: "",
     name: "",
-    description: ""
+    description: "",
+    sortOrder: "0",
+    isVisible: true
   });
   const [productForm, setProductForm] = useState({
     locationCode: "main",
@@ -74,6 +93,10 @@ export default function AdminHomePage() {
     slug: "",
     name: "",
     shortDescription: "",
+    longDescription: "",
+    isFeatured: false,
+    sortOrder: "0",
+    sku: "",
     variantName: "Default",
     priceAmount: "0.00"
   });
@@ -90,12 +113,54 @@ export default function AdminHomePage() {
     modifierGroupId: "",
     name: "",
     description: "",
-    priceDeltaAmount: "0.00"
+    priceDeltaAmount: "0.00",
+    sortOrder: "0",
+    isDefault: false,
+    isActive: true
   });
   const [attachForm, setAttachForm] = useState({
     locationCode: "main",
     productSlug: "",
     modifierGroupId: ""
+  });
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingOptionId, setEditingOptionId] = useState<string | null>(null);
+  const [categoryEditForm, setCategoryEditForm] = useState({
+    slug: "",
+    name: "",
+    description: "",
+    sortOrder: "0",
+    isVisible: true
+  });
+  const [productEditForm, setProductEditForm] = useState({
+    categorySlug: "",
+    slug: "",
+    name: "",
+    shortDescription: "",
+    longDescription: "",
+    isFeatured: false,
+    sortOrder: "0",
+    sku: "",
+    variantName: "Default",
+    priceAmount: "0.00"
+  });
+  const [groupEditForm, setGroupEditForm] = useState({
+    name: "",
+    description: "",
+    minSelect: "0",
+    maxSelect: "1",
+    sortOrder: "0",
+    isRequired: false
+  });
+  const [optionEditForm, setOptionEditForm] = useState({
+    name: "",
+    description: "",
+    priceDeltaAmount: "0.00",
+    sortOrder: "0",
+    isDefault: false,
+    isActive: true
   });
   const [isPending, startTransition] = useTransition();
 
@@ -207,6 +272,63 @@ export default function AdminHomePage() {
     });
   }
 
+  function beginCategoryEdit(category: Category) {
+    setEditingCategoryId(category.id);
+    setCategoryEditForm({
+      slug: category.slug,
+      name: category.name,
+      description: category.description ?? "",
+      sortOrder: String(category.sortOrder ?? 0),
+      isVisible: category.isVisible ?? true
+    });
+  }
+
+  function beginProductEdit(product: Product) {
+    const defaultVariant = product.variants[0];
+    setEditingProductId(product.id);
+    setProductEditForm({
+      categorySlug:
+        dashboard.categories.find(category => category.id === product.category?.id)?.slug ?? "",
+      slug: product.slug,
+      name: product.name,
+      shortDescription: product.shortDescription ?? "",
+      longDescription: product.longDescription ?? "",
+      isFeatured: product.isFeatured ?? false,
+      sortOrder: String(product.sortOrder ?? 0),
+      sku: defaultVariant?.sku ?? "",
+      variantName: defaultVariant?.name ?? "Default",
+      priceAmount: String(Number(defaultVariant?.priceAmount ?? 0).toFixed(2))
+    });
+  }
+
+  function beginGroupEdit(group: ModifierGroup) {
+    setEditingGroupId(group.id);
+    setGroupEditForm({
+      name: group.name,
+      description: group.description ?? "",
+      minSelect: String(group.minSelect ?? 0),
+      maxSelect: String(group.maxSelect ?? 1),
+      sortOrder: String(group.sortOrder ?? 0),
+      isRequired: group.isRequired ?? false
+    });
+  }
+
+  function beginOptionEdit(groupId: string, option: ModifierGroup["options"][number]) {
+    setOptionEditForm({
+      name: option.name,
+      description: option.description ?? "",
+      priceDeltaAmount: String(Number(option.priceDeltaAmount ?? 0).toFixed(2)),
+      sortOrder: String(option.sortOrder ?? 0),
+      isDefault: option.isDefault ?? false,
+      isActive: option.isActive ?? true
+    });
+    setOptionForm(current => ({
+      ...current,
+      modifierGroupId: groupId
+    }));
+    setEditingOptionId(option.id);
+  }
+
   if (isBootstrapping) {
     return (
       <main style={styles.shell}>
@@ -312,7 +434,9 @@ export default function AdminHomePage() {
                             ...categoryForm,
                             slug: categoryForm.slug.trim(),
                             name: categoryForm.name.trim(),
-                            description: categoryForm.description || undefined
+                            description: categoryForm.description || undefined,
+                            sortOrder: Number(categoryForm.sortOrder),
+                            isVisible: categoryForm.isVisible
                           })
                         },
                         accessToken
@@ -323,7 +447,9 @@ export default function AdminHomePage() {
                     locationCode: "main",
                     slug: "",
                     name: "",
-                    description: ""
+                    description: "",
+                    sortOrder: "0",
+                    isVisible: true
                   });
                 }, "Category saved.");
               }}
@@ -331,6 +457,8 @@ export default function AdminHomePage() {
               <TextInput label="Slug" value={categoryForm.slug} onChange={value => setCategoryForm(current => ({ ...current, slug: value }))} />
               <TextInput label="Name" value={categoryForm.name} onChange={value => setCategoryForm(current => ({ ...current, name: value }))} />
               <TextArea label="Description" value={categoryForm.description} onChange={value => setCategoryForm(current => ({ ...current, description: value }))} />
+              <TextInput label="Sort Order" value={categoryForm.sortOrder} onChange={value => setCategoryForm(current => ({ ...current, sortOrder: value }))} />
+              <CheckboxInput label="Visible category" checked={categoryForm.isVisible} onChange={checked => setCategoryForm(current => ({ ...current, isVisible: checked }))} />
               <button style={styles.primaryButton} type="submit" disabled={isPending}>
                 Save Category
               </button>
@@ -352,6 +480,8 @@ export default function AdminHomePage() {
                           method: "POST",
                           body: JSON.stringify({
                             ...productForm,
+                            slug: productForm.slug.trim(),
+                            name: productForm.name.trim(),
                             priceAmount: Number(productForm.priceAmount)
                           })
                         },
@@ -364,6 +494,10 @@ export default function AdminHomePage() {
                     slug: "",
                     name: "",
                     shortDescription: "",
+                    longDescription: "",
+                    isFeatured: false,
+                    sortOrder: "0",
+                    sku: "",
                     priceAmount: "0.00"
                   }));
                 }, "Product saved.");
@@ -384,25 +518,165 @@ export default function AdminHomePage() {
               <TextInput label="Slug" value={productForm.slug} onChange={value => setProductForm(current => ({ ...current, slug: value }))} />
               <TextInput label="Name" value={productForm.name} onChange={value => setProductForm(current => ({ ...current, name: value }))} />
               <TextArea label="Short Description" value={productForm.shortDescription} onChange={value => setProductForm(current => ({ ...current, shortDescription: value }))} />
+              <TextArea label="Long Description" value={productForm.longDescription} onChange={value => setProductForm(current => ({ ...current, longDescription: value }))} />
+              <TextInput label="Sort Order" value={productForm.sortOrder} onChange={value => setProductForm(current => ({ ...current, sortOrder: value }))} />
+              <TextInput label="SKU" value={productForm.sku} onChange={value => setProductForm(current => ({ ...current, sku: value }))} />
               <TextInput label="Variant Name" value={productForm.variantName} onChange={value => setProductForm(current => ({ ...current, variantName: value }))} />
               <TextInput label="Price Amount" value={productForm.priceAmount} onChange={value => setProductForm(current => ({ ...current, priceAmount: value }))} />
+              <CheckboxInput label="Featured product" checked={productForm.isFeatured} onChange={checked => setProductForm(current => ({ ...current, isFeatured: checked }))} />
               <button style={styles.primaryButton} type="submit" disabled={isPending}>
                 Save Product
               </button>
             </form>
           </Panel>
 
-          <Panel title="Catalog Snapshot">
+          <Panel title="Manage Categories">
+            <div style={styles.listStack}>
+              {dashboard.categories.map(category => (
+                <div key={category.id} style={styles.listCard}>
+                  <div style={styles.itemHeader}>
+                    <div>
+                      <strong>{category.name}</strong>
+                      <p style={styles.mutedText}>
+                        {category.slug} · Sort {category.sortOrder ?? 0} · {category.isVisible ? "Visible" : "Hidden"}
+                      </p>
+                    </div>
+                    <button style={styles.secondaryButton} onClick={() => beginCategoryEdit(category)}>
+                      Edit
+                    </button>
+                  </div>
+                  {editingCategoryId === category.id ? (
+                    <form
+                      style={styles.form}
+                      onSubmit={event => {
+                        event.preventDefault();
+                        void withRefresh(async () => {
+                          await withAdminSession(
+                            session,
+                            accessToken =>
+                              apiFetch(
+                                `/catalog/categories/${category.id}`,
+                                {
+                                  method: "PATCH",
+                                  body: JSON.stringify({
+                                    slug: categoryEditForm.slug.trim(),
+                                    name: categoryEditForm.name.trim(),
+                                    description: categoryEditForm.description || undefined,
+                                    sortOrder: Number(categoryEditForm.sortOrder),
+                                    isVisible: categoryEditForm.isVisible
+                                  })
+                                },
+                                accessToken
+                              ),
+                            setSession
+                          );
+                          setEditingCategoryId(null);
+                        }, "Category updated.");
+                      }}
+                    >
+                      <TextInput label="Slug" value={categoryEditForm.slug} onChange={value => setCategoryEditForm(current => ({ ...current, slug: value }))} />
+                      <TextInput label="Name" value={categoryEditForm.name} onChange={value => setCategoryEditForm(current => ({ ...current, name: value }))} />
+                      <TextArea label="Description" value={categoryEditForm.description} onChange={value => setCategoryEditForm(current => ({ ...current, description: value }))} />
+                      <TextInput label="Sort Order" value={categoryEditForm.sortOrder} onChange={value => setCategoryEditForm(current => ({ ...current, sortOrder: value }))} />
+                      <CheckboxInput label="Visible category" checked={categoryEditForm.isVisible} onChange={checked => setCategoryEditForm(current => ({ ...current, isVisible: checked }))} />
+                      <div style={styles.inlineActions}>
+                        <button style={styles.primaryButton} type="submit" disabled={isPending}>
+                          Update Category
+                        </button>
+                        <button style={styles.secondaryButton} type="button" onClick={() => setEditingCategoryId(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="Manage Products">
             <div style={styles.listStack}>
               {dashboard.products.map(product => (
                 <div key={product.id} style={styles.listCard}>
-                  <strong>{product.name}</strong>
-                  <p style={styles.mutedText}>{product.category?.name || "Uncategorised"} - {product.slug}</p>
-                  <p style={styles.mutedText}>
-                    {product.variants
-                      .map(variant => `${variant.name} ${formatCurrency(variant.priceAmount)}`)
-                      .join(" - ")}
-                  </p>
+                  <div style={styles.itemHeader}>
+                    <div>
+                      <strong>{product.name}</strong>
+                      <p style={styles.mutedText}>{product.category?.name || "Uncategorised"} · {product.slug}</p>
+                      <p style={styles.mutedText}>
+                        {product.variants
+                          .map(variant => `${variant.name} ${formatCurrency(variant.priceAmount)}`)
+                          .join(" - ")}
+                      </p>
+                    </div>
+                    <button style={styles.secondaryButton} onClick={() => beginProductEdit(product)}>
+                      Edit
+                    </button>
+                  </div>
+                  {editingProductId === product.id ? (
+                    <form
+                      style={styles.form}
+                      onSubmit={event => {
+                        event.preventDefault();
+                        void withRefresh(async () => {
+                          await withAdminSession(
+                            session,
+                            accessToken =>
+                              apiFetch(
+                                `/catalog/products/${product.id}`,
+                                {
+                                  method: "PATCH",
+                                  body: JSON.stringify({
+                                    categorySlug: productEditForm.categorySlug,
+                                    slug: productEditForm.slug.trim(),
+                                    name: productEditForm.name.trim(),
+                                    shortDescription: productEditForm.shortDescription || undefined,
+                                    longDescription: productEditForm.longDescription || undefined,
+                                    isFeatured: productEditForm.isFeatured,
+                                    sortOrder: Number(productEditForm.sortOrder),
+                                    sku: productEditForm.sku || undefined,
+                                    variantName: productEditForm.variantName,
+                                    priceAmount: Number(productEditForm.priceAmount)
+                                  })
+                                },
+                                accessToken
+                              ),
+                            setSession
+                          );
+                          setEditingProductId(null);
+                        }, "Product updated.");
+                      }}
+                    >
+                      <SelectInput
+                        label="Category"
+                        value={productEditForm.categorySlug}
+                        onChange={value => setProductEditForm(current => ({ ...current, categorySlug: value }))}
+                        options={[
+                          { value: "", label: "Select a category" },
+                          ...dashboard.categories.map(category => ({
+                            value: category.slug,
+                            label: category.name
+                          }))
+                        ]}
+                      />
+                      <TextInput label="Slug" value={productEditForm.slug} onChange={value => setProductEditForm(current => ({ ...current, slug: value }))} />
+                      <TextInput label="Name" value={productEditForm.name} onChange={value => setProductEditForm(current => ({ ...current, name: value }))} />
+                      <TextArea label="Short Description" value={productEditForm.shortDescription} onChange={value => setProductEditForm(current => ({ ...current, shortDescription: value }))} />
+                      <TextArea label="Long Description" value={productEditForm.longDescription} onChange={value => setProductEditForm(current => ({ ...current, longDescription: value }))} />
+                      <TextInput label="Sort Order" value={productEditForm.sortOrder} onChange={value => setProductEditForm(current => ({ ...current, sortOrder: value }))} />
+                      <TextInput label="SKU" value={productEditForm.sku} onChange={value => setProductEditForm(current => ({ ...current, sku: value }))} />
+                      <TextInput label="Variant Name" value={productEditForm.variantName} onChange={value => setProductEditForm(current => ({ ...current, variantName: value }))} />
+                      <TextInput label="Price Amount" value={productEditForm.priceAmount} onChange={value => setProductEditForm(current => ({ ...current, priceAmount: value }))} />
+                      <CheckboxInput label="Featured product" checked={productEditForm.isFeatured} onChange={checked => setProductEditForm(current => ({ ...current, isFeatured: checked }))} />
+                      <div style={styles.inlineActions}>
+                        <button style={styles.primaryButton} type="submit" disabled={isPending}>
+                          Update Product
+                        </button>
+                        <button style={styles.secondaryButton} type="button" onClick={() => setEditingProductId(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -481,7 +755,10 @@ export default function AdminHomePage() {
                           method: "POST",
                           body: JSON.stringify({
                             ...optionForm,
-                            priceDeltaAmount: Number(optionForm.priceDeltaAmount)
+                            priceDeltaAmount: Number(optionForm.priceDeltaAmount),
+                            sortOrder: Number(optionForm.sortOrder),
+                            isDefault: optionForm.isDefault,
+                            isActive: optionForm.isActive
                           })
                         },
                         accessToken
@@ -492,7 +769,10 @@ export default function AdminHomePage() {
                     modifierGroupId: optionForm.modifierGroupId,
                     name: "",
                     description: "",
-                    priceDeltaAmount: "0.00"
+                    priceDeltaAmount: "0.00",
+                    sortOrder: "0",
+                    isDefault: false,
+                    isActive: true
                   });
                 }, "Modifier option saved.");
               }}
@@ -512,6 +792,9 @@ export default function AdminHomePage() {
               <TextInput label="Option Name" value={optionForm.name} onChange={value => setOptionForm(current => ({ ...current, name: value }))} />
               <TextArea label="Description" value={optionForm.description} onChange={value => setOptionForm(current => ({ ...current, description: value }))} />
               <TextInput label="Price Delta" value={optionForm.priceDeltaAmount} onChange={value => setOptionForm(current => ({ ...current, priceDeltaAmount: value }))} />
+              <TextInput label="Sort Order" value={optionForm.sortOrder} onChange={value => setOptionForm(current => ({ ...current, sortOrder: value }))} />
+              <CheckboxInput label="Default option" checked={optionForm.isDefault} onChange={checked => setOptionForm(current => ({ ...current, isDefault: checked }))} />
+              <CheckboxInput label="Active option" checked={optionForm.isActive} onChange={checked => setOptionForm(current => ({ ...current, isActive: checked }))} />
               <button style={styles.primaryButton} type="submit" disabled={isPending}>
                 Save Option
               </button>
@@ -570,22 +853,134 @@ export default function AdminHomePage() {
             </form>
           </Panel>
 
-          <Panel title="Modifier Snapshot">
+          <Panel title="Manage Modifier Groups">
             <div style={styles.listStack}>
               {dashboard.modifierGroups.map(group => (
                 <div key={group.id} style={styles.listCard}>
-                  <strong>{group.name}</strong>
-                  <p style={styles.mutedText}>
-                    {group.options
-                      .map(option => `${option.name} ${formatCurrency(option.priceDeltaAmount)}`)
-                      .join(" - ")}
-                  </p>
-                  <p style={styles.mutedText}>
-                    Applied to:{" "}
-                    {group.products.length
-                      ? group.products.map(entry => entry.product.name).join(", ")
-                      : "No products yet"}
-                  </p>
+                  <div style={styles.itemHeader}>
+                    <div>
+                      <strong>{group.name}</strong>
+                      <p style={styles.mutedText}>
+                        Min {group.minSelect ?? 0} · Max {group.maxSelect ?? 1} · Sort {group.sortOrder ?? 0} · {group.isRequired ? "Required" : "Optional"}
+                      </p>
+                      <p style={styles.mutedText}>
+                        Applied to:{" "}
+                        {group.products.length
+                          ? group.products.map(entry => entry.product.name).join(", ")
+                          : "No products yet"}
+                      </p>
+                    </div>
+                    <button style={styles.secondaryButton} onClick={() => beginGroupEdit(group)}>
+                      Edit
+                    </button>
+                  </div>
+                  {editingGroupId === group.id ? (
+                    <form
+                      style={styles.form}
+                      onSubmit={event => {
+                        event.preventDefault();
+                        void withRefresh(async () => {
+                          await withAdminSession(
+                            session,
+                            accessToken =>
+                              apiFetch(
+                                `/modifiers/groups/${group.id}`,
+                                {
+                                  method: "PATCH",
+                                  body: JSON.stringify({
+                                    name: groupEditForm.name.trim(),
+                                    description: groupEditForm.description || undefined,
+                                    minSelect: Number(groupEditForm.minSelect),
+                                    maxSelect: Number(groupEditForm.maxSelect),
+                                    sortOrder: Number(groupEditForm.sortOrder),
+                                    isRequired: groupEditForm.isRequired
+                                  })
+                                },
+                                accessToken
+                              ),
+                            setSession
+                          );
+                          setEditingGroupId(null);
+                        }, "Modifier group updated.");
+                      }}
+                    >
+                      <TextInput label="Name" value={groupEditForm.name} onChange={value => setGroupEditForm(current => ({ ...current, name: value }))} />
+                      <TextArea label="Description" value={groupEditForm.description} onChange={value => setGroupEditForm(current => ({ ...current, description: value }))} />
+                      <TextInput label="Min Select" value={groupEditForm.minSelect} onChange={value => setGroupEditForm(current => ({ ...current, minSelect: value }))} />
+                      <TextInput label="Max Select" value={groupEditForm.maxSelect} onChange={value => setGroupEditForm(current => ({ ...current, maxSelect: value }))} />
+                      <TextInput label="Sort Order" value={groupEditForm.sortOrder} onChange={value => setGroupEditForm(current => ({ ...current, sortOrder: value }))} />
+                      <CheckboxInput label="Required group" checked={groupEditForm.isRequired} onChange={checked => setGroupEditForm(current => ({ ...current, isRequired: checked }))} />
+                      <div style={styles.inlineActions}>
+                        <button style={styles.primaryButton} type="submit" disabled={isPending}>
+                          Update Group
+                        </button>
+                        <button style={styles.secondaryButton} type="button" onClick={() => setEditingGroupId(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+                  <div style={styles.optionList}>
+                    {group.options.map(option => (
+                      <div key={option.id} style={styles.optionCard}>
+                        <div>
+                          <strong>{option.name}</strong>
+                          <p style={styles.mutedText}>
+                            {formatCurrency(option.priceDeltaAmount)} · Sort {option.sortOrder ?? 0} · {option.isActive ? "Active" : "Inactive"}{option.isDefault ? " · Default" : ""}
+                          </p>
+                        </div>
+                        <button style={styles.secondaryButton} onClick={() => beginOptionEdit(group.id, option)}>
+                          Edit option
+                        </button>
+                        {editingOptionId === option.id ? (
+                          <form
+                            style={styles.form}
+                            onSubmit={event => {
+                              event.preventDefault();
+                              void withRefresh(async () => {
+                                await withAdminSession(
+                                  session,
+                                  accessToken =>
+                                    apiFetch(
+                                      `/modifiers/options/${option.id}`,
+                                      {
+                                        method: "PATCH",
+                                        body: JSON.stringify({
+                                          name: optionEditForm.name.trim(),
+                                          description: optionEditForm.description || undefined,
+                                          priceDeltaAmount: Number(optionEditForm.priceDeltaAmount),
+                                          sortOrder: Number(optionEditForm.sortOrder),
+                                          isDefault: optionEditForm.isDefault,
+                                          isActive: optionEditForm.isActive
+                                        })
+                                      },
+                                      accessToken
+                                    ),
+                                  setSession
+                                );
+                                setEditingOptionId(null);
+                              }, "Modifier option updated.");
+                            }}
+                          >
+                            <TextInput label="Option Name" value={optionEditForm.name} onChange={value => setOptionEditForm(current => ({ ...current, name: value }))} />
+                            <TextArea label="Description" value={optionEditForm.description} onChange={value => setOptionEditForm(current => ({ ...current, description: value }))} />
+                            <TextInput label="Price Delta" value={optionEditForm.priceDeltaAmount} onChange={value => setOptionEditForm(current => ({ ...current, priceDeltaAmount: value }))} />
+                            <TextInput label="Sort Order" value={optionEditForm.sortOrder} onChange={value => setOptionEditForm(current => ({ ...current, sortOrder: value }))} />
+                            <CheckboxInput label="Default option" checked={optionEditForm.isDefault} onChange={checked => setOptionEditForm(current => ({ ...current, isDefault: checked }))} />
+                            <CheckboxInput label="Active option" checked={optionEditForm.isActive} onChange={checked => setOptionEditForm(current => ({ ...current, isActive: checked }))} />
+                            <div style={styles.inlineActions}>
+                              <button style={styles.primaryButton} type="submit" disabled={isPending}>
+                                Update Option
+                              </button>
+                              <button style={styles.secondaryButton} type="button" onClick={() => setEditingOptionId(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
@@ -679,6 +1074,23 @@ function SelectInput({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+function CheckboxInput({
+  label,
+  checked,
+  onChange
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label style={styles.checkboxLabel}>
+      <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />
+      {label}
     </label>
   );
 }
@@ -851,5 +1263,29 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 16,
     background: "rgba(255,255,255,0.03)",
     border: "1px solid rgba(255,255,255,0.05)"
+  },
+  itemHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 16,
+    alignItems: "flex-start",
+    marginBottom: 12
+  },
+  inlineActions: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap"
+  },
+  optionList: {
+    display: "grid",
+    gap: 12
+  },
+  optionCard: {
+    padding: 14,
+    borderRadius: 14,
+    background: "rgba(255,255,255,0.025)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    display: "grid",
+    gap: 12
   }
 };

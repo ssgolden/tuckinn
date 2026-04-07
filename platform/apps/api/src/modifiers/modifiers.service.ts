@@ -6,6 +6,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AttachModifierGroupDto } from "./dto/attach-modifier-group.dto";
 import { CreateModifierGroupDto } from "./dto/create-modifier-group.dto";
 import { CreateModifierOptionDto } from "./dto/create-modifier-option.dto";
+import { UpdateModifierGroupDto } from "./dto/update-modifier-group.dto";
+import { UpdateModifierOptionDto } from "./dto/update-modifier-option.dto";
 
 @Injectable()
 export class ModifiersService {
@@ -93,6 +95,45 @@ export class ModifiersService {
     });
   }
 
+  async updateModifierGroup(modifierGroupId: string, dto: UpdateModifierGroupDto) {
+    const modifierGroup = await this.prisma.modifierGroup.findUnique({
+      where: { id: modifierGroupId }
+    });
+
+    if (!modifierGroup) {
+      throw new NotFoundException("Modifier group not found.");
+    }
+
+    return this.prisma.modifierGroup.update({
+      where: { id: modifierGroupId },
+      data: {
+        name: dto.name ?? undefined,
+        description: dto.description ?? undefined,
+        minSelect: dto.minSelect ?? undefined,
+        maxSelect: dto.maxSelect ?? undefined,
+        sortOrder: dto.sortOrder ?? undefined,
+        isRequired: dto.isRequired ?? undefined
+      },
+      include: {
+        options: {
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+        },
+        products: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                slug: true,
+                name: true
+              }
+            }
+          },
+          orderBy: [{ sortOrder: "asc" }]
+        }
+      }
+    });
+  }
+
   async createModifierOption(dto: CreateModifierOptionDto) {
     const modifierGroup = await this.prisma.modifierGroup.findUnique({
       where: { id: dto.modifierGroupId }
@@ -131,6 +172,42 @@ export class ModifiersService {
         sortOrder: dto.sortOrder ?? 0,
         isDefault: dto.isDefault ?? false,
         isActive: dto.isActive ?? true
+      }
+    });
+  }
+
+  async updateModifierOption(modifierOptionId: string, dto: UpdateModifierOptionDto) {
+    const modifierOption = await this.prisma.modifierOption.findUnique({
+      where: { id: modifierOptionId }
+    });
+
+    if (!modifierOption) {
+      throw new NotFoundException("Modifier option not found.");
+    }
+
+    if (dto.isDefault) {
+      await this.prisma.modifierOption.updateMany({
+        where: {
+          modifierGroupId: modifierOption.modifierGroupId,
+          id: {
+            not: modifierOptionId
+          }
+        },
+        data: {
+          isDefault: false
+        }
+      });
+    }
+
+    return this.prisma.modifierOption.update({
+      where: { id: modifierOptionId },
+      data: {
+        name: dto.name ?? undefined,
+        description: dto.description ?? undefined,
+        priceDeltaAmount: dto.priceDeltaAmount ?? undefined,
+        sortOrder: dto.sortOrder ?? undefined,
+        isDefault: dto.isDefault ?? undefined,
+        isActive: dto.isActive ?? undefined
       }
     });
   }
