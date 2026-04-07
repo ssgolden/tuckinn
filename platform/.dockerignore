@@ -1,0 +1,12 @@
+node_modules
+.turbo
+.git
+.next
+dist
+coverage
+*.log
+apps/*/.next
+apps/*/node_modules
+apps/*/dist
+infra/docker/data
+pnpm-store

@@ -1,0 +1,173 @@
+name: tuckinn-platform
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      STORE_DOMAIN: ${STORE_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      STAFF_DOMAIN: ${STAFF_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - storefront
+      - admin
+      - staff
+      - api
+    logging: *default-logging
+    networks:
+      - edge
+      - internal
+
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-bookworm
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks:
+      - internal
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - ../../.env.production
+    environment:
+      PORT: 3200
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3200/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks:
+      - internal
+
+  seed:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    profiles: ["tools"]
+    env_file:
+      - ../../.env.production
+    command: ["pnpm", "--filter", "@tuckinn/api", "prisma:seed"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+    networks:
+      - internal
+
+  storefront:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.next
+      args:
+        APP_NAME: storefront
+        NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}/api
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks:
+      - internal
+
+  admin:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.next
+      args:
+        APP_NAME: admin
+        NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}/api
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks:
+      - internal
+
+  staff:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.next
+      args:
+        APP_NAME: staff
+        NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}/api
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:
+  internal:

@@ -1,0 +1,19 @@
+{$STORE_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy storefront:3000
+}
+
+{$ADMIN_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy admin:3000
+}
+
+{$STAFF_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy staff:3000
+}
+
+{$API_DOMAIN} {
+  encode gzip zstd
+  reverse_proxy api:3200
+}

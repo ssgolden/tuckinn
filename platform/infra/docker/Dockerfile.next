@@ -1,0 +1,37 @@
+FROM node:20-bookworm-slim AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
+FROM base AS build
+WORKDIR /app
+
+ARG APP_NAME
+ARG NEXT_PUBLIC_API_BASE_URL
+
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+
+COPY package.json pnpm-lock.yaml* ./
+COPY pnpm-workspace.yaml turbo.json ./
+COPY apps/storefront/package.json apps/storefront/package.json
+COPY apps/admin/package.json apps/admin/package.json
+COPY apps/staff/package.json apps/staff/package.json
+RUN pnpm install --frozen-lockfile=false
+
+COPY . .
+RUN pnpm --filter @tuckinn/${APP_NAME} build
+
+FROM node:20-bookworm-slim AS runner
+WORKDIR /app
+
+ARG APP_NAME
+ENV NODE_ENV=production
+ENV PORT=3000
+
+COPY --from=build /app/apps/${APP_NAME}/.next/standalone ./
+COPY --from=build /app/apps/${APP_NAME}/.next/static ./apps/${APP_NAME}/.next/static
+COPY --from=build /app/apps/${APP_NAME}/public ./apps/${APP_NAME}/public
+
+WORKDIR /app/apps/${APP_NAME}
+EXPOSE 3000
+CMD ["node", "server.js"]

@@ -1,0 +1,48 @@
+:root {
+  color-scheme: dark;
+  --bg: #120c0c;
+  --panel: #1d1313;
+  --panel-strong: #261818;
+  --panel-soft: #2b1d1d;
+  --border: rgba(255, 255, 255, 0.1);
+  --text: #f7f0e8;
+  --muted: #b9a8a1;
+  --brand: #c63b2d;
+  --brand-strong: #e34c3b;
+  --success: #3bb273;
+  --warning: #f2a93b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top, rgba(198, 59, 45, 0.22), transparent 34%),
+    linear-gradient(180deg, #140d0d 0%, #0e0909 100%);
+  color: var(--text);
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+body {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}

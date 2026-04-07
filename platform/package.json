@@ -1,0 +1,26 @@
+{
+  "name": "tuckinn-platform",
+  "private": true,
+  "packageManager": "pnpm@10.8.1",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "turbo run format",
+    "db:generate": "pnpm --filter @tuckinn/api prisma:generate",
+    "db:push": "pnpm --filter @tuckinn/api prisma:push",
+    "db:migrate": "pnpm --filter @tuckinn/api prisma:migrate",
+    "db:migrate:deploy": "pnpm --filter @tuckinn/api prisma:migrate:deploy",
+    "db:studio": "pnpm --filter @tuckinn/api prisma:studio",
+    "db:seed": "pnpm --filter @tuckinn/api prisma:seed"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.3",
+    "turbo": "^2.0.12"
+  }
+}

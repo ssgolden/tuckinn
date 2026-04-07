@@ -1,0 +1,6 @@
+{
+  "name": "@tuckinn/types",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

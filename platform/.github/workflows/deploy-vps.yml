@@ -1,0 +1,52 @@
+name: Deploy VPS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.8.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+        working-directory: platform
+
+      - name: Build apps
+        run: |
+          pnpm --filter @tuckinn/api build
+          pnpm --filter @tuckinn/storefront build
+          pnpm --filter @tuckinn/admin build
+          pnpm --filter @tuckinn/staff build
+        working-directory: platform
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            cd /opt/tuckinn-platform
+            git pull
+            cd platform
+            chmod +x infra/docker/deploy-vps.sh
+            ./infra/docker/deploy-vps.sh
