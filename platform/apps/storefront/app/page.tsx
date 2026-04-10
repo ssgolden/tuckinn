@@ -1,9 +1,44 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useState, useTransition } from "react";
+import { FormEvent, useEffect, useState, useTransition, useRef } from "react";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import {
+  buildInitialSelections,
+  formatMoney,
+  getBasketUpsellProducts,
+  getCategoryMixLabel,
+  getCategorySummary,
+  getDefaultOptionIds,
+  getMerchandisedProducts,
+  getMissingGroups,
+  getProductPrice,
+  getSelectedCount,
+  getSelectionLabel,
+  MENU_FILTERS,
+  type Category,
+  type MenuFilter,
+  type ModifierGroup,
+  type Product,
+  type ProductSelectionState,
+  type StorefrontView
+} from "./_storefront/catalog";
+import { CategoryStory } from "./_storefront/category-story";
+import { BasketUpsells } from "./_storefront/basket-upsells";
+import { BuilderGuide } from "./_storefront/builder-guide";
+import { storefrontContent, type StorefrontRouteAction } from "./_storefront/content";
+import { FeaturedGrid } from "./_storefront/featured-grid";
+import { StorefrontHero } from "./_storefront/hero";
+import { MenuRail } from "./_storefront/menu-rail";
+import { OrderPaths } from "./_storefront/order-paths";
+import { ProductCard } from "./_storefront/product-card";
+import { SectionShell } from "./_storefront/section-shell";
+import { SocialProof } from "./_storefront/social-proof";
+import { TrustStrip } from "./_storefront/trust-strip";
 import {
   ADMIN_APP_URL,
+  API_APP_URL,
   ApiError,
   apiFetch,
   clearStoredCartId,
@@ -18,23 +53,8 @@ import {
   type PublicCatalogResponse
 } from "../lib/api";
 
-type ProductSelectionState = {
-  selectedOptionIds: string[];
-  notes: string;
-};
-
-type Category = PublicCatalogResponse["categories"][number];
-type Product = Category["products"][number];
-type ModifierGroup = Product["modifierGroups"][number];
-type StorefrontView = "home" | "menu" | "builder" | "basket" | "access";
-type MenuFilter = "all" | "quick" | "build" | "featured";
-
-const MENU_FILTERS: Array<{ value: MenuFilter; label: string }> = [
-  { value: "all", label: "All items" },
-  { value: "quick", label: "Quick order" },
-  { value: "build", label: "Custom builds" },
-  { value: "featured", label: "Featured" }
-];
+const BRAND_NAME = "Tuckinn Proper";
+const BRAND_TAGLINE = "The best thing since sliced bread";
 
 export default function StorefrontHomePage() {
   const [catalog, setCatalog] = useState<PublicCatalogResponse | null>(null);
@@ -52,24 +72,62 @@ export default function StorefrontHomePage() {
     customerEmail: "",
     customerPhone: "",
     orderKind: "collect",
+    deliveryAddressLine1: "",
+    deliveryAddressLine2: "",
+    deliveryCity: "",
+    deliveryPostcode: "",
     specialInstructions: ""
   });
   const [backOfficeSession, setBackOfficeSession] = useState<BackOfficeSession | null>(null);
   const [authForm, setAuthForm] = useState({
-    email: "admin@tuckinn.local",
-    password: "ChangeMe123!"
+    email: "",
+    password: ""
   });
   const [authState, setAuthState] = useState<string | null>(null);
   const [authStateTone, setAuthStateTone] = useState<"success" | "error">("success");
   const [isAuthPending, setIsAuthPending] = useState(false);
   const [checkoutState, setCheckoutState] = useState<string | null>(null);
+  const [paymentState, setPaymentState] = useState<"idle" | "paying" | "confirmed" | "failed">("idle");
+  const [pendingPayment, setPendingPayment] = useState<{ clientSecret: string; publishableKey: string; orderNumber: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
+  const [isPendingAction, setIsPendingAction] = useState(false);
+  const [lastAddedProductId, setLastAddedProductId] = useState<string | null>(null);
+  const [isBasketPulseActive, setIsBasketPulseActive] = useState(false);
+
+  const cartPromiseRef = useRef<Promise<string> | null>(null);
 
   useEffect(() => {
+    // Handle Stripe Checkout redirect back
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get("payment");
+    const orderNumber = params.get("order");
+    if (paymentStatus === "success" && orderNumber) {
+      setCheckoutState(`Order ${orderNumber} — Payment confirmed! Thank you.`);
+      clearStoredCartId();
+      setCart(null);
+      setCartId(null);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (paymentStatus === "cancelled" && orderNumber) {
+      setError(`Payment for order ${orderNumber} was cancelled. You can try again.`);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    if (!lastAddedProductId) return;
+    const timer = window.setTimeout(() => setLastAddedProductId(null), 1400);
+    return () => window.clearTimeout(timer);
+  }, [lastAddedProductId]);
+
+  useEffect(() => {
+    if (!isBasketPulseActive) return;
+    const timer = window.setTimeout(() => setIsBasketPulseActive(false), 700);
+    return () => window.clearTimeout(timer);
+  }, [isBasketPulseActive]);
 
   const categories = catalog?.categories ?? [];
   const activeCategory =
@@ -90,15 +148,83 @@ export default function StorefrontHomePage() {
   const builderGroup =
     builderProduct?.modifierGroups[builderStep] ?? builderProduct?.modifierGroups[0] ?? null;
   const basketCount = cart?.items.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
-  const homeCategories = categories.slice(0, 6);
-  const signatureProducts = categories
-    .flatMap(category =>
-      category.products
-        .filter(product => product.isFeatured)
-        .map(product => ({ ...product, categoryName: category.name }))
-    )
-    .slice(0, 4);
-  const visibleProducts = getFilteredProducts(activeCategory, menuFilter);
+  const homeCategories = categories.slice(0, 4);
+  const featuredItems = getHomeFeaturedItems(categories).map(item => ({
+    ...item,
+    price: formatMoney(item.priceAmount),
+    onOpen: () => openMenu(item.categoryId)
+  }));
+  const visibleProducts = getMerchandisedProducts(activeCategory, menuFilter);
+  const activeCategoryQuickCount = activeCategory
+    ? activeCategory.products.filter(product => product.modifierGroups.length === 0).length
+    : 0;
+  const activeCategoryCustomCount = activeCategory
+    ? activeCategory.products.filter(product => product.modifierGroups.length > 0).length
+    : 0;
+  const showStickyBasketBar =
+    basketCount > 0 && view !== "basket" && view !== "access" && paymentState !== "paying";
+  const showStickyBuilderBar =
+    view === "home" && basketCount === 0 && paymentState !== "paying";
+  const basketUpsells = getBasketUpsellProducts(categories, cart);
+  const builderStepCount = builderProduct?.modifierGroups.length ?? 0;
+  const builderStepLabel = `Step ${builderStep + 1} of ${builderStepCount}`;
+  const builderSelectionCount = builderGroup
+    ? getSelectedCount(builderGroup, builderSelection?.selectedOptionIds ?? [])
+    : 0;
+  const builderGuideDetail = builderGroup
+    ? builderSelectionCount >= builderGroup.minSelect
+      ? storefrontContent.builder.readyLabel
+      : storefrontContent.builder.requiredLabel
+    : storefrontContent.builder.requiredLabel;
+
+  function openMealDeals() {
+    openMenu(categories.find(category => category.name === "Meal Deals")?.id);
+  }
+
+  function handleRouteAction(action: StorefrontRouteAction) {
+    if (action === "menu") {
+      openMenu();
+      return;
+    }
+
+    if (action === "mealDeals") {
+      openMealDeals();
+      return;
+    }
+
+    openBuilder();
+  }
+
+  // Helper Functions Inside Component
+  function getCategoryIcon(name: string) {
+    const n = name.toLowerCase();
+    if (n.includes("sandwich")) return "lunch_dining";
+    if (n.includes("breakfast")) return "bakery_dining";
+    if (n.includes("drink")) return "local_cafe";
+    if (n.includes("deal")) return "sell";
+    return "restaurant";
+  }
+
+  function formatSelections(product: Product, selection: ProductSelectionState) {
+    return product.modifierGroups
+      .map(group => {
+        const selected = group.options
+          .filter(opt => selection.selectedOptionIds.includes(opt.id))
+          .map(opt => opt.name);
+        return selected.length > 0 ? `${group.name}: ${selected.join(", ")}` : null;
+      })
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  function getProductPrice(product: Product, selection: ProductSelectionState) {
+    const base = product.variants.find(v => v.isDefault)?.priceAmount ?? product.variants[0]?.priceAmount ?? 0;
+    const extra = product.modifierGroups
+      .flatMap(g => g.options)
+      .filter(opt => selection.selectedOptionIds.includes(opt.id))
+      .reduce((sum, opt) => sum + opt.priceDeltaAmount, 0);
+    return base + extra;
+  }
 
   async function bootstrap() {
     try {
@@ -138,19 +264,26 @@ export default function StorefrontHomePage() {
   }
 
   async function ensureCart() {
-    if (cartId) {
-      return cartId;
-    }
+    if (cartId) return cartId;
+    if (cartPromiseRef.current) return cartPromiseRef.current;
 
-    const createdCart = await apiFetch<CartResponse>("/carts", {
-      method: "POST",
-      body: JSON.stringify({ locationCode: "main" })
-    });
+    cartPromiseRef.current = (async () => {
+      try {
+        const createdCart = await apiFetch<CartResponse>("/carts", {
+          method: "POST",
+          body: JSON.stringify({ locationCode: "main" })
+        });
 
-    setCart(createdCart);
-    setCartId(createdCart.id);
-    saveStoredCartId(createdCart.id);
-    return createdCart.id;
+        setCart(createdCart);
+        setCartId(createdCart.id);
+        saveStoredCartId(createdCart.id);
+        return createdCart.id;
+      } finally {
+        cartPromiseRef.current = null;
+      }
+    })();
+
+    return cartPromiseRef.current;
   }
 
   function openMenu(categoryId?: string) {
@@ -245,98 +378,86 @@ export default function StorefrontHomePage() {
           setError(`You can only choose ${group.maxSelect} option(s) for ${group.name}.`);
           return current;
         }
-        nextIds = [...nextIds, optionId];
-      } else if (group.isRequired && selectedInGroup.length <= group.minSelect) {
-        setError(`${group.name} requires at least ${group.minSelect} selection(s).`);
+        nextIds.push(optionId);
+      } else if (group.minSelect > 0 && selectedInGroup.length <= group.minSelect) {
+        setError(`${group.name} requires at least ${group.minSelect} option(s).`);
         return current;
       }
 
       setError(null);
-
       return {
         ...current,
-        [product.id]: {
-          ...currentState,
-          selectedOptionIds: nextIds
-        }
+        [product.id]: { ...currentState, selectedOptionIds: nextIds }
       };
     });
   }
 
   function updateNotes(productId: string, notes: string) {
-    const product = categories
-      .flatMap(category => category.products)
-      .find(item => item.id === productId);
-
     setSelections(current => ({
       ...current,
       [productId]: {
-        selectedOptionIds:
-          current[productId]?.selectedOptionIds ??
-          (product ? getDefaultOptionIds(product) : []),
+        ...(current[productId] ?? { selectedOptionIds: [], notes: "" }),
         notes
       }
     }));
   }
 
   function goBuilderNext() {
-    if (!builderProduct || !builderGroup || !builderSelection) {
+    if (!builderProduct || !builderSelection || !builderGroup) return;
+    const count = getSelectedCount(builderGroup, builderSelection.selectedOptionIds);
+    if (count < builderGroup.minSelect) {
+      setError(`Please select at least ${builderGroup.minSelect} for ${builderGroup.name}.`);
       return;
     }
-
-    if (getSelectedCount(builderGroup, builderSelection.selectedOptionIds) < builderGroup.minSelect) {
-      setError(`${builderGroup.name} requires at least ${builderGroup.minSelect} selection(s).`);
-      return;
-    }
-
     setError(null);
     setBuilderStep(current => Math.min(current + 1, builderProduct.modifierGroups.length - 1));
   }
 
   async function addProductToCart(product: Product) {
-    startTransition(async () => {
-      try {
-        setError(null);
-        setCheckoutState(null);
-        const selection = selections[product.id] ?? {
-          selectedOptionIds: getDefaultOptionIds(product),
-          notes: ""
-        };
-        const missingGroups = getMissingGroups(product, selection);
-        if (missingGroups.length > 0) {
-          setError(`Complete ${missingGroups.join(", ")} before adding this item.`);
-          openBuilder(product.id);
-          return;
-        }
+    setIsPendingAction(true);
+    setError(null);
+    try {
+      const selection = selections[product.id] ?? {
+        selectedOptionIds: getDefaultOptionIds(product),
+        notes: ""
+      };
 
-        const activeCartId = await ensureCart();
-        const defaultVariant = product.variants.find(variant => variant.isDefault) ?? product.variants[0];
-        const updatedCart = await apiFetch<CartResponse>(`/carts/${activeCartId}/items`, {
-          method: "POST",
-          body: JSON.stringify({
-            productSlug: product.slug,
-            variantId: defaultVariant?.id,
-            quantity: 1,
-            notes: selection.notes || undefined,
-            selectedOptionIds: selection.selectedOptionIds
-          })
-        });
-
-        setCart(updatedCart);
-        setView("basket");
-      } catch (cartError) {
-        setError(cartError instanceof Error ? cartError.message : "Failed to add item.");
+      const missingGroups = getMissingGroups(product, selection);
+      if (missingGroups.length > 0) {
+        setError(`Complete ${missingGroups.join(", ")} before adding this item.`);
+        openBuilder(product.id);
+        return;
       }
-    });
+
+      const activeCartId = await ensureCart();
+      const variant = product.variants.find(v => v.isDefault) ?? product.variants[0];
+
+      const updatedCart = await apiFetch<CartResponse>(`/carts/${activeCartId}/items`, {
+        method: "POST",
+        body: JSON.stringify({
+          productSlug: product.slug,
+          variantId: variant.id,
+          quantity: 1,
+          selectedOptionIds: selection.selectedOptionIds,
+          notes: selection.notes
+        })
+      });
+
+      setCart(updatedCart);
+      setLastAddedProductId(product.id);
+      setIsBasketPulseActive(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add item to basket.");
+    } finally {
+      setIsPendingAction(false);
+    }
   }
 
   async function removeCartItem(itemId: string) {
-    if (!cartId) {
-      return;
-    }
-
+    if (!cartId) return;
     startTransition(async () => {
       try {
+        setError(null);
         const updatedCart = await apiFetch<CartResponse>(`/carts/${cartId}/items/${itemId}`, {
           method: "DELETE"
         });
@@ -354,215 +475,309 @@ export default function StorefrontHomePage() {
       return;
     }
 
-    startTransition(async () => {
-      try {
-        setError(null);
-        const result = await apiFetch<{
-          order: { orderNumber: string };
-          payment: { provider: string; status: string };
-        }>("/checkout/start", {
-          method: "POST",
-          body: JSON.stringify({
-            cartId,
-            idempotencyKey: crypto.randomUUID(),
-            orderKind: checkoutForm.orderKind,
-            customerName: checkoutForm.customerName,
-            customerEmail: checkoutForm.customerEmail || undefined,
-            customerPhone: checkoutForm.customerPhone || undefined,
-            specialInstructions: checkoutForm.specialInstructions || undefined
-          })
-        });
+    setIsPendingAction(true);
+    try {
+      setError(null);
+      const deliveryAddress =
+        checkoutForm.orderKind === "delivery"
+          ? {
+              line1: checkoutForm.deliveryAddressLine1.trim(),
+              line2: checkoutForm.deliveryAddressLine2.trim() || undefined,
+              city: checkoutForm.deliveryCity.trim(),
+              postcode: checkoutForm.deliveryPostcode.trim()
+            }
+          : undefined;
+      const result = await apiFetch<{
+        order: { orderNumber: string };
+        payment: { provider: string; status: string; checkoutUrl?: string; clientSecret?: string; publishableKey?: string };
+      }>("/checkout/start", {
+        method: "POST",
+        body: JSON.stringify({
+          cartId,
+          idempotencyKey: crypto.randomUUID(),
+          orderKind: checkoutForm.orderKind,
+          customerName: checkoutForm.customerName,
+          customerEmail: checkoutForm.customerEmail || undefined,
+          customerPhone: checkoutForm.customerPhone || undefined,
+          specialInstructions: checkoutForm.specialInstructions || undefined,
+          ...(deliveryAddress ? { deliveryAddress } : {})
+        })
+      });
 
-        setCheckoutState(
-          `Order ${result.order.orderNumber} is ${result.payment.status} via ${result.payment.provider}.`
-        );
-        setView("basket");
-      } catch (checkoutError) {
-        setError(
-          checkoutError instanceof Error
-            ? checkoutError.message
-            : "Checkout could not be started."
-        );
+      if (result.payment.checkoutUrl) {
+        window.location.href = result.payment.checkoutUrl;
+      } else if (result.payment.clientSecret && result.payment.publishableKey) {
+        setPendingPayment({
+          clientSecret: result.payment.clientSecret,
+          publishableKey: result.payment.publishableKey,
+          orderNumber: result.order.orderNumber
+        });
+        setPaymentState("paying");
+      } else {
+        setCheckoutState(`Order ${result.order.orderNumber} confirmed!`);
+        clearStoredCartId();
+        setCart(null);
+        setCartId(null);
       }
-    });
+    } catch (checkoutError) {
+      setError(checkoutError instanceof Error ? checkoutError.message : "Checkout failed.");
+    } finally {
+      setIsPendingAction(false);
+    }
   }
+
+  async function handleStripePayment() {
+    if (!pendingPayment) return;
+    setPaymentState("paying");
+    try {
+      const stripe = await loadStripe(pendingPayment.publishableKey);
+      if (!stripe) throw new Error("Failed to initialize Stripe.");
+    } catch (payError) {
+      setPaymentState("failed");
+      setError(payError instanceof Error ? payError.message : "Payment failed.");
+    }
+  }
+
+function StripePaymentOverlay({
+  pendingPayment,
+  cartTotal,
+  formatMoney,
+  onSuccess,
+  onFailed,
+  onCancel
+}: {
+  pendingPayment: { clientSecret: string; publishableKey: string; orderNumber: string };
+  cartTotal: number;
+  formatMoney: (amount: number) => string;
+  onSuccess: () => void;
+  onFailed: (msg: string) => void;
+  onCancel: () => void;
+}) {
+  const stripePromise = loadStripe(pendingPayment.publishableKey);
+  return (
+    <div className="success-overlay">
+      <div className="success-card" style={{ maxWidth: 440 }}>
+        <h2>Pay for Order {pendingPayment.orderNumber}</h2>
+        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "4px 0 16px" }}>
+          Total: {formatMoney(cartTotal)}
+        </p>
+        <Elements stripe={stripePromise} options={{ clientSecret: pendingPayment.clientSecret }}>
+          <StripeCheckoutForm onSuccess={onSuccess} onFailed={onFailed} onCancel={onCancel} />
+        </Elements>
+      </div>
+    </div>
+  );
+}
+
+function StripeCheckoutForm({
+  onSuccess,
+  onFailed,
+  onCancel
+}: {
+  onSuccess: () => void;
+  onFailed: (msg: string) => void;
+  onCancel: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setIsProcessing(true);
+
+    const cardElement = elements.getElement(CardElement);
+    if (!cardElement) {
+      onFailed("Card input not available.");
+      setIsProcessing(false);
+      return;
+    }
+
+    const { error, paymentIntent } = await stripe.confirmCardPayment(
+      (elements as any)._options.clientSecret,
+      { payment_method: { card: cardElement } }
+    );
+
+    if (error) {
+      onFailed(error.message || "Payment failed.");
+    } else if (paymentIntent?.status === "succeeded") {
+      onSuccess();
+    } else {
+      onFailed(`Payment status: ${paymentIntent?.status}. Please try again.`);
+    }
+    setIsProcessing(false);
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div style={{
+        padding: "12px 14px",
+        border: "1px solid rgba(255,255,255,0.15)",
+        borderRadius: 8,
+        background: "rgba(255,255,255,0.04)",
+        marginBottom: 16
+      }}>
+        <CardElement options={{
+          style: {
+            base: {
+              color: "#fff",
+              fontFamily: "'Inter', system-ui, sans-serif",
+              fontSize: "16px",
+              "::placeholder": { color: "rgba(255,255,255,0.4)" }
+            },
+            invalid: { color: "#ff6b6b" }
+          }
+        }} />
+      </div>
+      <button type="submit" className="primary-action" disabled={!stripe || isProcessing} style={{ width: "100%" }}>
+        {isProcessing ? "Processing..." : "Pay Now"}
+      </button>
+      <button type="button" style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "var(--text)", padding: "10px 24px", borderRadius: 8, cursor: "pointer", width: "100%" }} onClick={onCancel}>
+        Cancel
+      </button>
+    </form>
+  );
+}
 
   if (isLoading) {
     return (
-      <main className="storefront-shell">
-        <section className="loading-screen">
-          <Image src="/logo.jpg" alt="Tuckinn Proper" width={220} height={110} className="brand-logo" priority />
-          <div>
-            <p className="section-kicker">Loading storefront</p>
-            <h1>Restoring the full menu and sandwich builder.</h1>
-          </div>
-        </section>
-      </main>
+      <div className="loading-screen">
+        <div className="spinner" />
+        <p>Loading {BRAND_NAME}...</p>
+      </div>
     );
   }
 
   return (
-    <main className="storefront-shell">
-      <header className="topbar">
-        <button type="button" className="topbar-button" onClick={() => setIsDrawerOpen(true)} aria-label="Open menu navigation">
-          Menu
-        </button>
-        <button type="button" className="brand-lockup" onClick={() => setView("home")} aria-label="Go to home">
-          <Image src="/logo.jpg" alt="Tuckinn Proper" width={180} height={90} className="brand-logo" priority />
-        </button>
-        <button type="button" className="topbar-button topbar-button-strong" onClick={() => setView("basket")}>
-          Basket {basketCount}
-        </button>
-      </header>
-
-      <div
-        className={isDrawerOpen ? "drawer-overlay drawer-overlay-open" : "drawer-overlay"}
-        onClick={() => setIsDrawerOpen(false)}
-      />
-      <aside className={isDrawerOpen ? "side-drawer side-drawer-open" : "side-drawer"} aria-label="Menu categories">
-        <div className="drawer-head">
-          <div>
-            <p className="section-kicker">Platinum menu</p>
-            <h2>Browse sections</h2>
-          </div>
-          <button type="button" className="drawer-close" onClick={() => setIsDrawerOpen(false)} aria-label="Close navigation">
-            Close
+    <main className="storefront-app">
+      <div className="app-header-shell">
+        <header className="app-header">
+          <button type="button" className="header-brand" onClick={() => setView("home")}>
+            <div className="brand-logo">
+              <Image src="/logo.jpg" alt={`${BRAND_NAME} logo`} fill sizes="56px" priority />
+            </div>
+            <div className="header-brand-copy">
+              <strong>{BRAND_NAME}</strong>
+              <span>{BRAND_TAGLINE}</span>
+            </div>
+            <div className={isBasketPulseActive ? "header-brand-status header-brand-status-pulse" : "header-brand-status"}>
+              <span>{basketCount ? `${basketCount} in basket` : "Order online"}</span>
+            </div>
           </button>
+          <button type="button" className="drawer-trigger" onClick={() => setIsDrawerOpen(true)}>
+            Browse
+          </button>
+        </header>
+      </div>
+
+      {isDrawerOpen && (
+        <div className="drawer-overlay" onClick={() => setIsDrawerOpen(false)}>
+          <nav className="drawer-content" onClick={e => e.stopPropagation()}>
+            <div className="drawer-head">
+              <strong>All Categories</strong>
+              <button type="button" onClick={() => setIsDrawerOpen(false)}>Close</button>
+            </div>
+            <div className="drawer-links">
+              {categories.map(category => (
+                <button
+                  key={category.id}
+                  className="drawer-link"
+                  onClick={() => openMenu(category.id)}
+                >
+                  <span className="material-icons category-icon" aria-hidden="true">
+                    {getCategoryIcon(category.name)}
+                  </span>
+                  {category.name}
+                </button>
+              ))}
+            </div>
+          </nav>
         </div>
-        <div className="drawer-list">
-          {categories.map(category => (
-            <button
-              key={category.id}
-              type="button"
-              className="drawer-item"
-              onClick={() => openMenu(category.id)}
-            >
-              <div>
-                <strong>{category.name}</strong>
-                <span>{category.description || "Browse this full section."}</span>
-              </div>
-              <em>{category.products.length}</em>
+      )}
+
+      {error && (
+        <div className="error-toast" onClick={() => setError(null)}>
+          <p>{error}</p>
+          <small>Click to dismiss</small>
+        </div>
+      )}
+
+      {checkoutState && paymentState !== "paying" && (
+        <div className="success-overlay">
+          <div className="success-card">
+            <h2>Success!</h2>
+            <p>{checkoutState}</p>
+            <button className="primary-action" onClick={() => { setCheckoutState(null); setPaymentState("idle"); }}>
+              Back to Store
             </button>
-          ))}
-          <button type="button" className="drawer-item drawer-item-strong" onClick={() => openBuilder()}>
-            <div>
-              <strong>Build Proper Sandwich</strong>
-              <span>Guided custom builder with required steps.</span>
-            </div>
-            <em>Go</em>
-          </button>
-          <button type="button" className="drawer-item" onClick={openAccess}>
-            <div>
-              <strong>Back Office Access</strong>
-              <span>{backOfficeSession ? "Session active for admin and staff tools." : "Sign in to the backend from the website."}</span>
-            </div>
-            <em>{backOfficeSession ? "Live" : "Login"}</em>
-          </button>
+          </div>
         </div>
-      </aside>
+      )}
 
-      {error ? <p className="inline-message inline-message-error">{error}</p> : null}
-      {checkoutState ? <p className="inline-message inline-message-success">{checkoutState}</p> : null}
+      {paymentState === "paying" && pendingPayment && (
+        <StripePaymentOverlay
+          pendingPayment={pendingPayment}
+          cartTotal={cart?.totalAmount ?? 0}
+          formatMoney={formatMoney}
+          onSuccess={() => {
+            setPaymentState("confirmed");
+            setCheckoutState(`Order ${pendingPayment.orderNumber} — Payment confirmed! Thank you.`);
+            clearStoredCartId();
+            setCart(null);
+            setCartId(null);
+            setPendingPayment(null);
+          }}
+          onFailed={(msg: string) => {
+            setPaymentState("failed");
+            setError(msg);
+          }}
+          onCancel={() => { setPaymentState("idle"); setPendingPayment(null); setError(null); }}
+        />
+      )}
+
+      {paymentState === "failed" && (
+        <div className="success-overlay">
+          <div className="success-card">
+            <h2>Payment Failed</h2>
+            <p>{error || "Your card was not charged. Please try again."}</p>
+            <button className="primary-action" onClick={() => { setPaymentState("paying"); setError(null); }}>
+              Try Again
+            </button>
+            <button style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "var(--text)", padding: "10px 24px", borderRadius: 8, cursor: "pointer" }} onClick={() => { setPaymentState("idle"); setPendingPayment(null); setError(null); }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {view === "home" ? (
-        <section className="home-view">
-          <section className="hero">
-            <div className="hero-copy">
-              <p className="section-kicker">Tuckinn Proper</p>
-              <h1>Order Proper</h1>
-              <p className="hero-lead">Sandwiches, meal deals, drinks, and custom builds without the clutter.</p>
-              <div className="hero-actions">
-                <button type="button" className="primary-action" onClick={() => openBuilder()}>
-                  Start Sandwich
-                </button>
-                <button type="button" className="secondary-action" onClick={() => openMenu()}>
-                  Open Full Menu
-                </button>
-              </div>
-              <div className="hero-metrics">
-                <div className="metric-card">
-                  <span>Categories</span>
-                  <strong>{categories.length}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Custom builds</span>
-                  <strong>{configurableProducts.length}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Basket total</span>
-                  <strong>{formatMoney(cart?.totalAmount ?? 0)}</strong>
-                </div>
-              </div>
-            </div>
-            <div className="hero-brand">
-              <div className="hero-brand-badge">
-                <span className="section-kicker">Quick start</span>
-                <div className="quick-start-list">
-                  <button
-                    type="button"
-                    className="quick-start-item"
-                    onClick={() => openMenu(categories.find(category => category.name === "Meal Deals")?.id)}
-                  >
-                    <strong>Meal Deals</strong>
-                    <span>Fastest route into the menu</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="quick-start-item"
-                    onClick={() => openMenu(categories.find(category => category.name === "Originals")?.id)}
-                  >
-                    <strong>Originals</strong>
-                    <span>House sandwiches and signature builds</span>
-                  </button>
-                  <button type="button" className="quick-start-item" onClick={() => setView("basket")}>
-                    <strong>Basket</strong>
-                    <span>{basketCount ? `${basketCount} item(s) ready to review` : "Nothing added yet"}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
+        <section className="home-view view-enter">
+          <StorefrontHero
+            basketCount={basketCount}
+            brandName={BRAND_NAME}
+            onBrowseFavourites={() => openMenu()}
+            onStartBuilding={() => openBuilder()}
+          />
+          <TrustStrip />
+          <SocialProof items={storefrontContent.socialProof} />
 
-          <section className="content-panel">
-            <div className="panel-head">
-              <div>
-                <p className="section-kicker">Start here</p>
-                <h2>Choose your route</h2>
-              </div>
-            </div>
-            <div className="route-grid">
-              <button type="button" className="route-card route-card-primary" onClick={() => openBuilder()}>
-                <span className="route-tag">Custom build</span>
-                <strong>Build Your Sandwich</strong>
-                <p>Step through bread, protein, veg, cheese, sauce, and notes.</p>
-              </button>
-              <button
-                type="button"
-                className="route-card"
-                onClick={() => openMenu(categories.find(category => category.name === "Meal Deals")?.id)}
-              >
-                <span className="route-tag">Popular bundles</span>
-                <strong>Meal Deals</strong>
-                <p>Jump into the fastest-value section instead of browsing everything.</p>
-              </button>
-              <button type="button" className="route-card" onClick={openAccess}>
-                <span className="route-tag">Back office</span>
-                <strong>Backend Login</strong>
-                <p>{backOfficeSession ? "Session is active for admin and staff dashboards." : "Sign in to admin and staff tools from the storefront."}</p>
-              </button>
-            </div>
-          </section>
+          <SectionShell
+            eyebrow="Order your way"
+            title="Start with the sandwich builder"
+            body="Build your sandwich first, or jump into ready-made favourites when you already know what you want."
+          >
+            <OrderPaths onRouteSelect={handleRouteAction} />
+          </SectionShell>
 
-          <section className="content-panel">
-            <div className="panel-head">
-              <div>
-                <p className="section-kicker">Menu overview</p>
-                <h2>Featured categories</h2>
-              </div>
-              <button type="button" className="text-link" onClick={() => setIsDrawerOpen(true)}>
-                Open all sections
-              </button>
-            </div>
+          <SectionShell
+            eyebrow="Tuckinn favourites"
+            title="Popular picks ready fast"
+          >
+            <FeaturedGrid items={featuredItems} />
+          </SectionShell>
+
+          <SectionShell eyebrow="Menu overview" title="Choose a section">
             <div className="category-grid">
               {homeCategories.map(category => (
                 <button
@@ -572,10 +787,15 @@ export default function StorefrontHomePage() {
                   onClick={() => openMenu(category.id)}
                 >
                   <div className="category-card-top">
-                    <span>{category.name}</span>
+                    <span className="category-card-title">
+                      <span className="material-icons category-icon" aria-hidden="true">
+                        {getCategoryIcon(category.name)}
+                      </span>
+                      {category.name}
+                    </span>
                     <em>{category.products.length} items</em>
                   </div>
-                  <strong>{category.description || "Fast section access from the live menu."}</strong>
+                  <strong>{category.description || "Open this section and browse all items."}</strong>
                   <div className="category-card-meta">
                     <span>{getCategoryMixLabel(category)}</span>
                     <span>{getCategorySummary(category)}</span>
@@ -583,55 +803,18 @@ export default function StorefrontHomePage() {
                 </button>
               ))}
             </div>
-          </section>
+            <div className="utility-link-row">
+              <button type="button" className="text-link" onClick={() => setIsDrawerOpen(true)}>
+                Open all menu sections
+              </button>
+            </div>
+          </SectionShell>
 
-          <section className="content-panel">
-            <div className="panel-head">
-              <div>
-                <p className="section-kicker">Staff picks</p>
-                <h2>Signature menu items</h2>
-              </div>
-            </div>
-            <div className="signature-list">
-              {signatureProducts.map(product => {
-                const selection = selections[product.id] ?? {
-                  selectedOptionIds: getDefaultOptionIds(product),
-                  notes: ""
-                };
-                return (
-                  <article key={product.id} className="signature-card">
-                    <div className="signature-copy">
-                      <span className="signature-category">{product.categoryName}</span>
-                      <h3>{product.name}</h3>
-                      <p>{product.shortDescription || "Prepared for a fast lunch service."}</p>
-                    </div>
-                    <div className="signature-meta">
-                      <span className="signature-price-label">
-                        {product.modifierGroups.length ? "Build available" : "Quick add"}
-                      </span>
-                      <strong>{formatMoney(getProductPrice(product, selection))}</strong>
-                      <button
-                        type="button"
-                        className={product.modifierGroups.length ? "secondary-action" : "primary-action"}
-                        onClick={() =>
-                          product.modifierGroups.length
-                            ? openBuilder(product.id)
-                            : void addProductToCart(product)
-                        }
-                      >
-                        {product.modifierGroups.length ? "Customize" : "Add"}
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
         </section>
       ) : null}
 
       {view === "menu" ? (
-        <section className="menu-view">
+        <section className="menu-view view-enter">
           <section className="menu-hero">
             <div>
               <p className="section-kicker">Menu category</p>
@@ -644,18 +827,23 @@ export default function StorefrontHomePage() {
           </section>
 
           <section className="content-panel">
-            <div className="category-strip">
-              {categories.map(category => (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={activeCategory?.id === category.id ? "nav-pill nav-pill-active" : "nav-pill"}
-                  onClick={() => openMenu(category.id)}
-                >
-                  {category.name}
-                </button>
-              ))}
+            <div className="panel-head">
+              <div>
+                <p className="section-kicker">Browse this section</p>
+                <h2>{visibleProducts.length} item{visibleProducts.length === 1 ? "" : "s"} to choose from</h2>
+              </div>
+              <span className="support-badge">
+                {MENU_FILTERS.find(filter => filter.value === menuFilter)?.label ?? "Show all"}
+              </span>
             </div>
+            <p className="menu-helper-copy">
+              Ready-made items add straight away. Build your own stays available when you want full control.
+            </p>
+            <MenuRail
+              categories={categories.map(category => ({ id: category.id, name: category.name }))}
+              activeCategoryId={activeCategory?.id ?? null}
+              onSelect={openMenu}
+            />
             <div className="submenu-strip">
               {MENU_FILTERS.map(filter => (
                 <button
@@ -671,46 +859,33 @@ export default function StorefrontHomePage() {
           </section>
 
           <section className="menu-list">
+            {activeCategory ? (
+              <CategoryStory
+                title="Fast lunch favourites first"
+                description={
+                  activeCategory.description ||
+                  "Ready-made picks stay first for a faster lunch."
+                }
+                quickCount={activeCategoryQuickCount}
+                customCount={activeCategoryCustomCount}
+              />
+            ) : null}
             {visibleProducts.map(product => {
               const selection = selections[product.id] ?? {
                 selectedOptionIds: getDefaultOptionIds(product),
                 notes: ""
               };
               return (
-                <article key={product.id} className="menu-row">
-                  <div className="menu-row-copy">
-                    <div className="menu-row-top">
-                      <div>
-                        <span className="item-type">
-                          {product.modifierGroups.length ? "Custom build" : "Quick order"}
-                        </span>
-                        <h3>{product.name}</h3>
-                      </div>
-                      <strong>{formatMoney(getProductPrice(product, selection))}</strong>
-                    </div>
-                    <p>{product.shortDescription || "Prepared for a fast lunch service."}</p>
-                    {product.modifierGroups.length ? (
-                      <div className="menu-subgroups">
-                        {product.modifierGroups.slice(0, 4).map(group => (
-                          <div key={group.id} className="menu-subgroup">
-                            <strong>{group.name}</strong>
-                            <span>{group.options.slice(0, 3).map(option => option.name).join(", ")}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="menu-row-actions">
-                    {product.modifierGroups.length ? (
-                      <button type="button" className="secondary-action" onClick={() => openBuilder(product.id)}>
-                        Customize
-                      </button>
-                    ) : null}
-                    <button type="button" className="primary-action" onClick={() => void addProductToCart(product)} disabled={isPending}>
-                      {isPending ? "Updating..." : "Add to order"}
-                    </button>
-                  </div>
-                </article>
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  selection={selection}
+                  priceLabel={formatMoney(getProductPrice(product, selection))}
+                  isPendingAction={isPendingAction}
+                  isRecentlyAdded={lastAddedProductId === product.id}
+                  onCustomise={() => openBuilder(product.id)}
+                  onAdd={() => void addProductToCart(product)}
+                />
               );
             })}
             {visibleProducts.length === 0 ? (
@@ -723,142 +898,136 @@ export default function StorefrontHomePage() {
         </section>
       ) : null}
 
-      {view === "builder" && builderProduct && builderSelection ? (
-        <section className="builder-view">
-          <section className="builder-hero">
-            <div>
-              <p className="section-kicker">Build your sandwich</p>
-              <h1>{builderProduct.name}</h1>
-              <p>{builderProduct.shortDescription}</p>
-            </div>
-            <strong className="builder-price">{formatMoney(getProductPrice(builderProduct, builderSelection))}</strong>
-          </section>
+      {view === "builder" && builderProduct && builderSelection && (
+        <section className="builder-view view-enter">
+          <div className="builder-header">
+            <p className="section-kicker">{builderProduct.name}</p>
+            <h1>Sandwich Builder</h1>
+            <p>{builderProduct.shortDescription}</p>
+          </div>
+
+          <div className="progress-track">
+            {builderProduct.modifierGroups.map((group, idx) => (
+              <button
+                key={group.id}
+                className={`step-dot ${idx === builderStep ? "active" : ""} ${
+                  getSelectedCount(group, builderSelection.selectedOptionIds) >= group.minSelect ? "done" : ""
+                }`}
+                onClick={() => setBuilderStep(idx)}
+                title={group.name}
+              >
+                {idx + 1}
+              </button>
+            ))}
+          </div>
 
           <div className="builder-layout">
-            <section className="content-panel">
-              <div className="builder-switches">
-                {configurableProducts.map(product => (
-                  <button
-                    key={product.id}
-                    type="button"
-                    className={builderProduct.id === product.id ? "nav-pill nav-pill-active" : "nav-pill"}
-                    onClick={() => {
-                      setBuilderProductId(product.id);
-                      setBuilderStep(0);
-                      setError(null);
-                    }}
-                  >
-                    {product.name}
-                  </button>
-                ))}
+            <div className="builder-stage">
+              <BuilderGuide
+                currentStep={builderStep + 1}
+                totalSteps={builderStepCount}
+                title={builderGroup?.name || builderStepLabel}
+                body={
+                  builderStepCount > 1
+                    ? storefrontContent.builder.progressIntro
+                    : storefrontContent.builder.progressSingle
+                }
+                detail={
+                  builderGroup
+                    ? `${builderGuideDetail} • ${
+                        builderGroup.maxSelect === 1
+                          ? "Choose 1 option"
+                          : `Choose ${builderGroup.minSelect} to ${builderGroup.maxSelect} options`
+                      }`
+                    : builderGuideDetail
+                }
+              />
+
+              <div className="stage-head">
+                <h2>{builderGroup?.name}</h2>
+                <p>{builderGroup?.description || "Select from the options below"}</p>
               </div>
 
-              <div className="progress-strip">
-                {builderProduct.modifierGroups.map((group, index) => {
-                  const complete = getSelectedCount(group, builderSelection.selectedOptionIds) >= group.minSelect;
+              <div className="options-grid">
+                {builderGroup?.options.map(option => {
+                  const isSelected = builderSelection.selectedOptionIds.includes(option.id);
                   return (
                     <button
-                      key={group.id}
-                      type="button"
-                      className={
-                        index === builderStep
-                          ? "progress-pill progress-pill-current"
-                          : complete
-                            ? "progress-pill progress-pill-complete"
-                            : "progress-pill"
-                      }
-                      onClick={() => setBuilderStep(index)}
+                      key={option.id}
+                      className={`option-tile ${isSelected ? "selected" : ""}`}
+                      onClick={() => toggleOption(builderProduct, builderGroup!, option.id)}
                     >
-                      {index + 1}. {group.name}
+                      <div className="tile-content">
+                        <strong>{option.name}</strong>
+                        {option.priceDeltaAmount > 0 && (
+                          <span className="price-tag">+{formatMoney(option.priceDeltaAmount)}</span>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
               </div>
 
-              {builderGroup ? (
-                <div className="builder-stage">
-                  <div className="panel-head">
-                    <div>
-                      <p className="section-kicker">Step {builderStep + 1}</p>
-                      <h2>{builderGroup.name}</h2>
-                    </div>
-                    <span className="selection-rule">
-                      {builderGroup.minSelect} to {builderGroup.maxSelect} choice(s)
-                    </span>
-                  </div>
-                  <p className="stage-copy">{builderGroup.description || "Choose from the available options below."}</p>
-                  <div className="builder-options">
-                    {builderGroup.options.map(option => {
-                      const selected = builderSelection.selectedOptionIds.includes(option.id);
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          className={selected ? "option-card option-card-selected" : "option-card"}
-                          onClick={() => toggleOption(builderProduct, builderGroup, option.id)}
-                        >
-                          <strong>{option.name}</strong>
-                          <span>
-                            {option.priceDeltaAmount > 0 ? `+ ${formatMoney(option.priceDeltaAmount)}` : "Included"}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <label className="field">
-                    Sandwich notes
-                    <textarea
-                      className="text-area"
-                      value={builderSelection.notes}
-                      onChange={event => updateNotes(builderProduct.id, event.target.value)}
-                      placeholder="Allergies, toast level, or extra build notes"
-                    />
-                  </label>
-                  <div className="builder-actions">
-                    <button
-                      type="button"
-                      className="secondary-action"
-                      onClick={() => setBuilderStep(current => Math.max(current - 1, 0))}
-                      disabled={builderStep === 0}
-                    >
-                      Previous
-                    </button>
-                    {builderStep < builderProduct.modifierGroups.length - 1 ? (
-                      <button type="button" className="primary-action" onClick={goBuilderNext}>
-                        Next step
-                      </button>
-                    ) : (
-                      <button type="button" className="primary-action" onClick={() => void addProductToCart(builderProduct)} disabled={isPending}>
-                        {isPending ? "Adding..." : "Add sandwich"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </section>
-
-            <aside className="content-panel builder-summary">
-              <div className="panel-head">
-                <div>
-                  <p className="section-kicker">Current build</p>
-                  <h2>Selection summary</h2>
-                </div>
+              <div className="builder-nav">
+                <button
+                  className="secondary-action"
+                  disabled={builderStep === 0}
+                  onClick={() => setBuilderStep(s => s - 1)}
+                >
+                  Back
+                </button>
+                {builderStep < builderProduct.modifierGroups.length - 1 ? (
+                  <button className="primary-action" onClick={goBuilderNext}>
+                    Next step
+                  </button>
+                ) : (
+                  <button
+                    className="primary-action"
+                    disabled={isPendingAction}
+                    onClick={() => void addProductToCart(builderProduct)}
+                  >
+                    {isPendingAction ? "Adding..." : "Add to Order"}
+                  </button>
+                )}
               </div>
-              <div className="summary-list">
-                {builderProduct.modifierGroups.map(group => (
-                  <div key={group.id} className="summary-card">
-                    <strong>{group.name}</strong>
-                    <span>{getSelectionLabel(group, builderSelection.selectedOptionIds)}</span>
-                  </div>
-                ))}
+            </div>
+
+            <aside className="builder-summary">
+              <h3>Order Summary</h3>
+              <div className="summary-content">
+                <div className="summary-price">
+                  <span>Total Price</span>
+                  <strong>{formatMoney(getProductPrice(builderProduct, builderSelection))}</strong>
+                </div>
+                <div className="summary-details">
+                  {builderProduct.modifierGroups.map(group => (
+                    <div key={group.id} className="summary-item">
+                      <strong>{group.name}</strong>
+                      <p>{getSelectionLabel(group, builderSelection.selectedOptionIds)}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </aside>
           </div>
         </section>
+      )}
+
+      {view === "builder" && (!builderProduct || !builderSelection) ? (
+        <section className="builder-view view-enter">
+          <div className="builder-header">
+            <p className="section-kicker">Build it your way</p>
+            <h1>Sandwich Builder</h1>
+            <p>Custom builder options are not available yet. Browse favourites while we prepare them.</p>
+          </div>
+          <button type="button" className="secondary-action" onClick={() => openMenu()}>
+            Browse Favourites
+          </button>
+        </section>
       ) : null}
 
       {view === "basket" ? (
-        <section className="basket-view">
+        <section className="basket-view view-enter">
           <div className="basket-layout">
             <section className="content-panel">
               <div className="panel-head">
@@ -867,6 +1036,10 @@ export default function StorefrontHomePage() {
                   <h2>Basket</h2>
                 </div>
                 <strong>{basketCount} item(s)</strong>
+              </div>
+              <div className="basket-helper-card">
+                <strong>Check your basket first.</strong>
+                <p>Remove anything you do not want before moving on to your details.</p>
               </div>
               <div className="basket-items">
                 {cart?.items.length ? (
@@ -898,18 +1071,37 @@ export default function StorefrontHomePage() {
                   </div>
                 )}
               </div>
+              <BasketUpsells
+                body={storefrontContent.basket.upsellBody}
+                products={basketUpsells}
+                selections={selections}
+                isPendingAction={isPendingAction}
+                onAdd={product => {
+                  void addProductToCart(product);
+                }}
+              />
               <div className="basket-totals">
                 <div><span>Subtotal</span><strong>{formatMoney(cart?.subtotalAmount ?? 0)}</strong></div>
                 <div><span>Total</span><strong>{formatMoney(cart?.totalAmount ?? 0)}</strong></div>
               </div>
             </section>
 
-            <section className="content-panel">
+            <section className="content-panel basket-checkout-panel">
               <div className="panel-head">
                 <div>
                   <p className="section-kicker">Checkout</p>
-                  <h2>Customer details</h2>
+                  <h2>Your details</h2>
                 </div>
+              </div>
+              <p className="basket-checkout-intro">
+                {storefrontContent.basket.intro}
+              </p>
+              <div className="basket-reassurance-list">
+                {storefrontContent.basket.reassurance.map(item => (
+                  <span key={item} className="basket-reassurance-pill">
+                    {item}
+                  </span>
+                ))}
               </div>
               <form className="checkout-form" onSubmit={handleCheckout}>
                 <label className="field">
@@ -918,29 +1110,96 @@ export default function StorefrontHomePage() {
                 </label>
                 <label className="field">
                   Email
-                  <input className="text-input" type="email" value={checkoutForm.customerEmail} onChange={event => setCheckoutForm(current => ({ ...current, customerEmail: event.target.value }))} />
+                  <input className="text-input" type="email" inputMode="email" value={checkoutForm.customerEmail} onChange={event => setCheckoutForm(current => ({ ...current, customerEmail: event.target.value }))} />
                 </label>
                 <label className="field">
                   Phone
-                  <input className="text-input" value={checkoutForm.customerPhone} onChange={event => setCheckoutForm(current => ({ ...current, customerPhone: event.target.value }))} />
+                  <input className="text-input" inputMode="tel" value={checkoutForm.customerPhone} onChange={event => setCheckoutForm(current => ({ ...current, customerPhone: event.target.value }))} />
                 </label>
                 <label className="field">
                   Order type
                   <select className="select-input" value={checkoutForm.orderKind} onChange={event => setCheckoutForm(current => ({ ...current, orderKind: event.target.value }))}>
-                    <option value="collect">Collect</option>
+                    <option value="collect">Collect from store</option>
                     <option value="delivery">Delivery</option>
                   </select>
                 </label>
+                {checkoutForm.orderKind === "delivery" ? (
+                  <fieldset className="delivery-address-panel">
+                    <legend className="delivery-address-heading" role="heading" aria-level={3}>
+                      Delivery address
+                    </legend>
+                    <label className="field">
+                      Address line 1
+                      <input
+                        className="text-input"
+                        value={checkoutForm.deliveryAddressLine1}
+                        onChange={event =>
+                          setCheckoutForm(current => ({
+                            ...current,
+                            deliveryAddressLine1: event.target.value
+                          }))
+                        }
+                        autoComplete="address-line1"
+                        required
+                      />
+                    </label>
+                    <label className="field">
+                      Address line 2
+                      <input
+                        className="text-input"
+                        value={checkoutForm.deliveryAddressLine2}
+                        onChange={event =>
+                          setCheckoutForm(current => ({
+                            ...current,
+                            deliveryAddressLine2: event.target.value
+                          }))
+                        }
+                        autoComplete="address-line2"
+                      />
+                    </label>
+                    <div className="checkout-field-grid">
+                      <label className="field">
+                        Town or city
+                        <input
+                          className="text-input"
+                          value={checkoutForm.deliveryCity}
+                          onChange={event =>
+                            setCheckoutForm(current => ({
+                              ...current,
+                              deliveryCity: event.target.value
+                            }))
+                          }
+                          autoComplete="address-level2"
+                          required
+                        />
+                      </label>
+                      <label className="field">
+                        Postcode
+                        <input
+                          className="text-input"
+                          value={checkoutForm.deliveryPostcode}
+                          onChange={event =>
+                            setCheckoutForm(current => ({
+                              ...current,
+                              deliveryPostcode: event.target.value
+                            }))
+                          }
+                          autoComplete="postal-code"
+                          required
+                        />
+                      </label>
+                    </div>
+                  </fieldset>
+                ) : null}
                 <label className="field">
-                  Special instructions
+                  Kitchen notes
                   <textarea className="text-area" value={checkoutForm.specialInstructions} onChange={event => setCheckoutForm(current => ({ ...current, specialInstructions: event.target.value }))} placeholder="Pickup timing, allergies, or delivery notes" />
                 </label>
-                <button type="submit" className="primary-action" disabled={isPending || !cart?.items.length}>
-                  {isPending ? "Starting checkout..." : "Start checkout"}
+                <button type="submit" className="primary-action" disabled={isPendingAction || !cart?.items.length}>
+                  {isPendingAction ? "Placing Order..." : "Proceed to Payment"}
                 </button>
                 <p className="checkout-note">
-                  The backend creates the order and payment intent first. Live card collection
-                  comes online once real Stripe keys replace the placeholder values.
+                  You will be asked to confirm payment with your card after placing the order.
                 </p>
               </form>
             </section>
@@ -949,7 +1208,7 @@ export default function StorefrontHomePage() {
       ) : null}
 
       {view === "access" ? (
-        <section className="access-view">
+        <section className="access-view view-enter">
           <section className="access-hero">
             <div>
               <p className="section-kicker">Back office access</p>
@@ -996,7 +1255,7 @@ export default function StorefrontHomePage() {
                     <button type="button" className="secondary-action" onClick={() => openDashboard(STAFF_APP_URL)}>
                       Open Staff
                     </button>
-                    <button type="button" className="secondary-action" onClick={() => openDashboard("http://localhost:3200/api")}>
+                    <button type="button" className="secondary-action" onClick={() => openDashboard(API_APP_URL)}>
                       Open API
                     </button>
                   </div>
@@ -1060,12 +1319,41 @@ export default function StorefrontHomePage() {
                 </div>
                 <div className="access-link-card">
                   <strong>API root</strong>
-                  <span>http://localhost:3200/api</span>
+                  <span>{API_APP_URL}</span>
                 </div>
               </div>
             </aside>
           </div>
         </section>
+      ) : null}
+
+      {showStickyBasketBar ? (
+        <button
+          type="button"
+          className={isBasketPulseActive ? "sticky-basket-bar sticky-basket-bar-pulse" : "sticky-basket-bar"}
+          onClick={() => {
+            setView("basket");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
+          <span className="sticky-basket-copy">
+            <strong>{basketCount} item{basketCount === 1 ? "" : "s"} ready</strong>
+            <span>{formatMoney(cart?.totalAmount ?? 0)}</span>
+          </span>
+          <span className="sticky-basket-action">View basket</span>
+        </button>
+      ) : null}
+
+      {showStickyBuilderBar ? (
+        <button
+          type="button"
+          className="sticky-builder-bar"
+          aria-label="Open sticky sandwich builder action"
+          onClick={() => openBuilder()}
+        >
+          <span>Build your sandwich</span>
+          <strong>Start Building</strong>
+        </button>
       ) : null}
 
       <nav className="bottom-nav" aria-label="Primary">
@@ -1078,7 +1366,7 @@ export default function StorefrontHomePage() {
         <button type="button" className={view === "builder" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => openBuilder()}>
           Builder
         </button>
-        <button type="button" className={view === "basket" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => setView("basket")}>
+        <button type="button" className={view === "basket" ? "bottom-nav-item bottom-nav-item-active" : isBasketPulseActive ? "bottom-nav-item bottom-nav-item-pulse" : "bottom-nav-item"} onClick={() => setView("basket")}>
           Basket
         </button>
       </nav>
@@ -1086,104 +1374,44 @@ export default function StorefrontHomePage() {
   );
 }
 
-function buildInitialSelections(catalog: PublicCatalogResponse) {
-  return Object.fromEntries(
-    catalog.categories.flatMap(category =>
-      category.products.map(product => [
-        product.id,
-        { selectedOptionIds: getDefaultOptionIds(product), notes: "" }
-      ])
-    )
-  ) as Record<string, ProductSelectionState>;
-}
+function getHomeFeaturedItems(categories: Category[]) {
+  const featured = categories.flatMap(category =>
+    category.products
+      .filter(product => product.isFeatured)
+      .map(product => ({
+        id: product.id,
+        categoryId: category.id,
+        categoryName: category.name,
+        productName: product.name,
+        description: product.shortDescription || "Prepared for a faster lunch decision.",
+        priceAmount:
+          product.variants.find(variant => variant.isDefault)?.priceAmount ??
+          product.variants[0]?.priceAmount ??
+          0,
+        highlight:
+          product.modifierGroups.length > 0 ? "Customisable" : "Ready-made favourite"
+      }))
+  );
 
-function getDefaultOptionIds(product: Product) {
-  return product.modifierGroups.flatMap(group => {
-    const defaults = group.options.filter(option => option.isDefault).map(option => option.id);
-    if (defaults.length > 0) {
-      return defaults.slice(0, group.maxSelect);
-    }
-    if (group.isRequired && group.options[0]) {
-      return [group.options[0].id];
-    }
-    return [];
-  });
-}
-
-function getSelectedCount(group: ModifierGroup, selectedOptionIds: string[]) {
-  const groupIds = group.options.map(option => option.id);
-  return selectedOptionIds.filter(id => groupIds.includes(id)).length;
-}
-
-function getMissingGroups(product: Product, selection: ProductSelectionState) {
-  return product.modifierGroups
-    .filter(group => getSelectedCount(group, selection.selectedOptionIds) < group.minSelect)
-    .map(group => group.name);
-}
-
-function getSelectionLabel(group: ModifierGroup, selectedOptionIds: string[]) {
-  const labels = group.options
-    .filter(option => selectedOptionIds.includes(option.id))
-    .map(option => option.name);
-  if (labels.length === 0) {
-    return group.isRequired ? "Required selection pending" : "No selection";
-  }
-  return labels.join(", ");
-}
-
-function getProductPrice(product: Product, selection: ProductSelectionState) {
-  const basePrice =
-    product.variants.find(variant => variant.isDefault)?.priceAmount ??
-    product.variants[0]?.priceAmount ??
-    0;
-  const premium = product.modifierGroups
-    .flatMap(group => group.options)
-    .filter(option => selection.selectedOptionIds.includes(option.id))
-    .reduce((sum, option) => sum + option.priceDeltaAmount, 0);
-  return basePrice + premium;
-}
-
-function getFilteredProducts(category: Category | null, filter: MenuFilter) {
-  if (!category) {
-    return [];
+  if (featured.length >= 3) {
+    return featured.slice(0, 3);
   }
 
-  switch (filter) {
-    case "quick":
-      return category.products.filter(product => product.modifierGroups.length === 0);
-    case "build":
-      return category.products.filter(product => product.modifierGroups.length > 0);
-    case "featured":
-      return category.products.filter(product => product.isFeatured);
-    default:
-      return category.products;
-  }
-}
+  const fallback = categories.flatMap(category =>
+    category.products.slice(0, 1).map(product => ({
+      id: product.id,
+      categoryId: category.id,
+      categoryName: category.name,
+      productName: product.name,
+      description: product.shortDescription || "Prepared for a faster lunch decision.",
+      priceAmount:
+        product.variants.find(variant => variant.isDefault)?.priceAmount ??
+        product.variants[0]?.priceAmount ??
+        0,
+      highlight:
+        product.modifierGroups.length > 0 ? "Customisable" : "Ready-made favourite"
+    }))
+  );
 
-function getCategorySummary(category: Category) {
-  const configurableCount = category.products.filter(product => product.modifierGroups.length > 0).length;
-  if (configurableCount > 0) {
-    return `${configurableCount} custom build${configurableCount === 1 ? "" : "s"}`;
-  }
-  return "Ready to order";
-}
-
-function getCategoryMixLabel(category: Category) {
-  const configurableCount = category.products.filter(product => product.modifierGroups.length > 0).length;
-  const quickCount = category.products.length - configurableCount;
-
-  if (configurableCount > 0 && quickCount > 0) {
-    return `${quickCount} quick / ${configurableCount} custom`;
-  }
-  if (configurableCount > 0) {
-    return `${configurableCount} custom options`;
-  }
-  return `${quickCount} quick picks`;
-}
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("en-IE", {
-    style: "currency",
-    currency: "EUR"
-  }).format(Number(value) || 0);
+  return fallback.slice(0, 3);
 }
