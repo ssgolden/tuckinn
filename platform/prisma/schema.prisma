@@ -209,6 +209,7 @@ model DiningTable {
   id          String   @id @default(uuid()) @db.Uuid
   locationId  String   @map("location_id") @db.Uuid
   tableNumber Int      @map("table_number")
+  name        String?  @map("name")
   qrSlug      String   @unique @map("qr_slug")
   seats       Int?
   isActive    Boolean  @default(true) @map("is_active")

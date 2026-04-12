@@ -56,6 +56,15 @@ export type PublicCatalogResponse = {
   }>;
 };
 
+export type DiningTableResponse = {
+  id: string;
+  tableNumber: number;
+  name: string | null;
+  qrSlug: string;
+  seats: number | null;
+  isActive: boolean;
+};
+
 export type CartResponse = {
   id: string;
   status: string;
