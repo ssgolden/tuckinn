@@ -1,12 +1,40 @@
+import "reflect-metadata";
 import {
+  IsDefined,
+  IsEmail,
   IsEnum,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
-  MinLength
+  MinLength,
+  ValidateIf,
+  ValidateNested
 } from "class-validator";
+import { Type } from "class-transformer";
 import { OrderType, PaymentProvider } from "../../../src/generated/prisma/index.js";
+
+export class DeliveryAddressDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(160)
+  line1!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  line2?: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  city!: string;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(20)
+  postcode!: string;
+}
 
 export class StartCheckoutDto {
   @IsUUID()
@@ -26,7 +54,7 @@ export class StartCheckoutDto {
   customerName!: string;
 
   @IsOptional()
-  @IsString()
+  @IsEmail()
   @MaxLength(160)
   customerEmail?: string;
 
@@ -39,6 +67,12 @@ export class StartCheckoutDto {
   @IsString()
   @MaxLength(500)
   specialInstructions?: string;
+
+  @ValidateIf(dto => dto.orderKind === OrderType.delivery)
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => DeliveryAddressDto)
+  deliveryAddress?: DeliveryAddressDto;
 
   @IsOptional()
   @IsEnum(PaymentProvider)

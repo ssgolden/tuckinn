@@ -101,6 +101,12 @@ export class PaymentsService {
         case "payment_intent.amount_capturable_updated":
           await this.syncStripePaymentIntent(event.data.object, event.id, event.type);
           break;
+        case "checkout.session.completed":
+          await this.handleCheckoutSessionCompleted(event.data.object, event.id);
+          break;
+        case "checkout.session.expired":
+          await this.handleCheckoutSessionExpired(event.data.object, event.id);
+          break;
         default:
           break;
       }
@@ -379,6 +385,185 @@ export class PaymentsService {
     };
   }
 
+  async createCheckoutSession(input: {
+    paymentId: string;
+    orderId: string;
+    orderNumber: string;
+    amountMinor: number;
+    currencyCode: string;
+    idempotencyKey: string;
+    customerEmail?: string;
+    customerName?: string;
+    lineItems?: Array<{ name: string; amount: number; quantity: number }>;
+    storefrontUrl?: string;
+  }) {
+    if (!this.stripe) {
+      if (this.isMockPaymentsEnabled()) {
+        return this.initializeMockPayment(input);
+      }
+      throw new ServiceUnavailableException("Stripe is not configured.");
+    }
+
+    const storefrontUrl = input.storefrontUrl || this.getStorefrontUrl();
+
+    try {
+      const session = await this.stripe.checkout.sessions.create(
+        {
+          mode: "payment",
+          payment_method_types: ["card", "link"],
+          line_items: input.lineItems && input.lineItems.length > 0
+            ? input.lineItems.map(item => ({
+                price_data: {
+                  currency: input.currencyCode.toLowerCase(),
+                  product_data: { name: item.name },
+                  unit_amount: item.amount
+                },
+                quantity: item.quantity
+              }))
+            : [
+                {
+                  price_data: {
+                    currency: input.currencyCode.toLowerCase(),
+                    product_data: { name: `Order ${input.orderNumber}` },
+                    unit_amount: input.amountMinor
+                  },
+                  quantity: 1
+                }
+              ],
+          success_url: `${storefrontUrl}/?payment=success&order=${input.orderNumber}`,
+          cancel_url: `${storefrontUrl}/?payment=cancelled&order=${input.orderNumber}`,
+          customer_email: input.customerEmail,
+          metadata: {
+            orderId: input.orderId,
+            orderNumber: input.orderNumber,
+            paymentId: input.paymentId,
+            idempotencyKey: input.idempotencyKey
+          }
+        },
+        { idempotencyKey: input.idempotencyKey }
+      );
+
+      await this.prisma.payment.update({
+        where: { id: input.paymentId },
+        data: {
+          providerIntentId: session.id,
+          status: PaymentStatus.pending,
+          amountAuthorized: this.fromMinorUnits(input.amountMinor),
+          metadata: { checkoutSessionId: session.id, checkoutUrl: session.url }
+        }
+      });
+
+      await this.prisma.paymentEvent.create({
+        data: {
+          paymentId: input.paymentId,
+          provider: PaymentProvider.stripe,
+          eventType: "checkout_session.created",
+          providerEventId: session.id,
+          payload: { sessionId: session.id, url: session.url },
+          processedAt: new Date()
+        }
+      });
+
+      return {
+        checkoutUrl: session.url,
+        sessionId: session.id
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Checkout session creation failed.";
+      await this.prisma.payment.update({
+        where: { id: input.paymentId },
+        data: { status: PaymentStatus.failed, failureMessage: message }
+      });
+      throw new ServiceUnavailableException(message);
+    }
+  }
+
+  private async handleCheckoutSessionCompleted(session: any, eventId: string) {
+    const paymentId = session.metadata?.paymentId;
+    if (!paymentId) return;
+
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) return;
+
+    const updatedPayment = await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        providerPaymentId: session.payment_intent,
+        status: PaymentStatus.paid,
+        amountCaptured: this.fromMinorUnits(session.amount_total)
+      }
+    });
+
+    await this.prisma.paymentEvent.create({
+      data: {
+        paymentId: updatedPayment.id,
+        provider: PaymentProvider.stripe,
+        eventType: "checkout.session.completed",
+        providerEventId: eventId,
+        payload: session,
+        processedAt: new Date()
+      }
+    });
+
+    const order = await this.prisma.order.update({
+      where: { id: payment.orderId },
+      data: { status: OrderStatus.paid }
+    });
+
+    await this.prisma.cart.updateMany({
+      where: { customerUserId: order.customerUserId, status: CartStatus.active },
+      data: { status: CartStatus.converted }
+    });
+
+    this.realtimeGateway.emitOrderUpdated({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      source: "payments"
+    });
+    this.realtimeGateway.emitBoardRefresh({
+      source: "payments",
+      orderId: order.id,
+      status: order.status
+    });
+  }
+
+  private async handleCheckoutSessionExpired(session: any, eventId: string) {
+    const paymentId = session.metadata?.paymentId;
+    if (!paymentId) return;
+
+    await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: { status: PaymentStatus.failed, failureMessage: "Checkout session expired." }
+    });
+
+    await this.prisma.paymentEvent.create({
+      data: {
+        paymentId,
+        provider: PaymentProvider.stripe,
+        eventType: "checkout.session.expired",
+        providerEventId: eventId,
+        payload: session,
+        processedAt: new Date()
+      }
+    });
+  }
+
+  getStorefrontUrl(): string {
+    const domain = this.configService.get<string>("STORE_DOMAIN");
+    if (domain) {
+      return `https://${domain}`;
+    }
+
+    if (this.configService.get<string>("NODE_ENV") === "production") {
+      throw new ServiceUnavailableException(
+        "STORE_DOMAIN is not configured. Set it in your environment before deploying."
+      );
+    }
+
+    return "http://localhost:3005";
+  }
+
   private isMockPaymentsEnabled() {
     const configured = this.configService.get<string>("ALLOW_MOCK_PAYMENTS");
     if (configured) {
@@ -415,7 +600,7 @@ export class PaymentsService {
       throw new NotFoundException("Payment record for Stripe event was not found.");
     }
 
-    const paymentStatus = this.mapStripeStatus(paymentIntent.status);
+    const paymentStatus = this.mapStripeWebhookStatus(eventType, paymentIntent.status);
     const orderStatus = this.mapOrderStatusFromPayment(paymentStatus);
     const cartId =
       payment.order.metadata &&
@@ -595,6 +780,14 @@ export class PaymentsService {
       default:
         return PaymentStatus.pending;
     }
+  }
+
+  private mapStripeWebhookStatus(eventType: string, status: string): PaymentStatus {
+    if (eventType === "payment_intent.payment_failed") {
+      return PaymentStatus.failed;
+    }
+
+    return this.mapStripeStatus(status);
   }
 
   private mapOrderStatusFromPayment(paymentStatus: PaymentStatus): OrderStatus | null {

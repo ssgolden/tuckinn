@@ -140,6 +140,7 @@ export class OrdersService {
       customerEmail: order.customerEmail,
       customerPhone: order.customerPhone,
       specialInstructions: order.specialInstructions,
+      deliveryAddress: this.getDeliveryAddress(order.metadata),
       subtotalAmount: this.toDisplayAmount(order.subtotalAmount),
       discountAmount: this.toDisplayAmount(order.discountAmount),
       taxAmount: this.toDisplayAmount(order.taxAmount),
@@ -201,5 +202,38 @@ export class OrdersService {
 
   private toDisplayAmount(value: unknown): number {
     return Number(Number(value ?? 0).toFixed(2));
+  }
+
+  private getDeliveryAddress(metadata: unknown) {
+    if (!metadata || typeof metadata !== "object") {
+      return null;
+    }
+
+    const deliveryAddress = (metadata as { deliveryAddress?: unknown }).deliveryAddress;
+    if (!deliveryAddress || typeof deliveryAddress !== "object") {
+      return null;
+    }
+
+    const address = deliveryAddress as {
+      line1?: unknown;
+      line2?: unknown;
+      city?: unknown;
+      postcode?: unknown;
+    };
+
+    if (
+      typeof address.line1 !== "string" ||
+      typeof address.city !== "string" ||
+      typeof address.postcode !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      line1: address.line1,
+      line2: typeof address.line2 === "string" ? address.line2 : null,
+      city: address.city,
+      postcode: address.postcode
+    };
   }
 }

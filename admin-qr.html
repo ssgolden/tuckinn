@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Table QR Codes | Tuckinn</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #888;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 0.95rem;
+        }
+
+        .header-bar {
+            max-width: 1200px;
+            margin: 0 auto 20px auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-back,
+        .btn-print {
+            border: none;
+            border-radius: 10px;
+            padding: 10px 16px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .btn-back {
+            background: #2b2b2b;
+            color: #fff;
+        }
+
+        .btn-back:hover {
+            background: #3b3b3b;
+            color: #fff;
+        }
+
+        .btn-print {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        .btn-print:hover {
+            background: #c82333;
+        }
+
+        .status-box {
+            max-width: 1200px;
+            margin: 0 auto 20px auto;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 16px;
+            color: #bbb;
+        }
+
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .qr-card {
+            background: #171717;
+            border: 1px solid #2d2d2d;
+            border-radius: 18px;
+            padding: 20px;
+            text-align: center;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .qr-card:hover {
+            transform: translateY(-4px);
+            border-color: #dc3545;
+        }
+
+        .qr-card img {
+            width: 180px;
+            height: 180px;
+            margin-bottom: 14px;
+            background: #fff;
+            border-radius: 12px;
+            padding: 8px;
+        }
+
+        .table-num {
+            color: #dc3545;
+            font-size: 1.4rem;
+            font-weight: 800;
+            margin-bottom: 4px;
+        }
+
+        .table-label {
+            color: #888;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        .url-display {
+            color: #666;
+            font-size: 0.75rem;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-bar">
+        <a href="staff.html" class="btn-back">Back to Staff Board</a>
+        <span style="color:#dc3545; font-weight:700;">Table QR Codes</span>
+        <button class="btn-print" onclick="window.print()">Print All</button>
+    </div>
+
+    <h1>Tuckinn Table QR Codes</h1>
+    <p class="subtitle">Print and laminate these QR codes for each table.</p>
+
+    <div class="status-box" id="statusBox">Checking staff session...</div>
+    <div class="qr-grid" id="qrGrid" hidden></div>
+
+    <script>
+        const NUM_TABLES = 10;
+        const baseUrl = window.location.origin;
+        const grid = document.getElementById('qrGrid');
+        const statusBox = document.getElementById('statusBox');
+
+        async function init() {
+            try {
+                const response = await fetch('/api/staff/session', { credentials: 'same-origin' });
+                const data = await response.json();
+
+                if (!data.authenticated) {
+                    statusBox.textContent = 'Sign in on the staff board first, then reopen this page.';
+                    return;
+                }
+
+                statusBox.hidden = true;
+                grid.hidden = false;
+                renderCards();
+            } catch (error) {
+                statusBox.textContent = 'Could not verify the staff session.';
+            }
+        }
+
+        function renderCards() {
+            for (let table = 1; table <= NUM_TABLES; table += 1) {
+                const card = document.createElement('div');
+                card.className = 'qr-card';
+                card.innerHTML = `
+                    <img src="/api/qr/${table}" alt="Table ${table} QR code" loading="lazy">
+                    <div class="table-num">Table ${table}</div>
+                    <div class="table-label">Scan to order</div>
+                    <button class="btn-print" type="button" onclick="printQR(${table})">Print</button>
+                    <div class="url-display">${baseUrl}/?table=${table}</div>
+                `;
+                grid.appendChild(card);
+            }
+        }
+
+        function printQR(table) {
+            const win = window.open(`/api/qr/${table}`, '_blank');
+            if (!win) {
+                return;
+            }
+
+            win.onload = () => {
+                win.print();
+                win.close();
+            };
+        }
+
+        init();
+    </script>
+</body>
+</html>

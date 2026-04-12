@@ -22,6 +22,8 @@ Default value:
 
 ```text
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3200/api
+NEXT_PUBLIC_ADMIN_APP_URL=http://localhost:3101
+NEXT_PUBLIC_STAFF_APP_URL=http://localhost:3102
 ```
 
 ## What is ready now
@@ -80,11 +82,4 @@ pnpm db:seed
 
 ## Local seeded admin
 
-Current local seed credentials:
-
-```text
-admin@tuckinn.local
-ChangeMe123!
-```
-
-Change these before any shared or non-local use.
+Set local-only seed credentials in `platform/.env.example` before first use, and rotate them before any shared or non-local environment.

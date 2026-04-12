@@ -1,6 +1,26 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, useEffect, useState, useTransition } from "react";
+import { AdminAuthShell } from "./_admin/auth-shell";
+import {
+  CheckboxInput,
+  FileInput,
+  Panel,
+  SelectInput,
+  StatCard,
+  TextArea,
+  TextInput,
+  formatCurrency,
+  styles
+} from "./_admin/primitives";
+import {
+  INITIAL_STATE,
+  type Category,
+  type DashboardState,
+  type ModifierGroup,
+  type Product
+} from "./_admin/types";
 import {
   API_BASE_URL,
   apiFetch,
@@ -11,69 +31,6 @@ import {
   withAdminSession,
   type AdminSession
 } from "../lib/api";
-
-type Category = {
-  id: string;
-  slug: string;
-  name: string;
-  description?: string | null;
-  sortOrder?: number;
-  isVisible?: boolean;
-};
-
-type Product = {
-  id: string;
-  slug: string;
-  name: string;
-  shortDescription?: string | null;
-  longDescription?: string | null;
-  imageUrl?: string | null;
-  imageAltText?: string | null;
-  isFeatured?: boolean;
-  sortOrder?: number;
-  status?: "draft" | "active" | "archived";
-  category?: { id: string; name: string } | null;
-  variants: Array<{ id: string; name: string; priceAmount: number | string; sku?: string | null }>;
-  modifierGroups?: Array<{
-    modifierGroup: {
-      id: string;
-      name: string;
-      options: Array<{ id: string; name: string }>;
-    };
-  }>;
-};
-
-type ModifierGroup = {
-  id: string;
-  name: string;
-  description?: string | null;
-  minSelect?: number;
-  maxSelect?: number;
-  sortOrder?: number;
-  isRequired?: boolean;
-  options: Array<{
-    id: string;
-    name: string;
-    description?: string | null;
-    priceDeltaAmount: number | string;
-    sortOrder?: number;
-    isDefault?: boolean;
-    isActive?: boolean;
-  }>;
-  products: Array<{ product: { id: string; slug: string; name: string } }>;
-};
-
-type DashboardState = {
-  categories: Category[];
-  products: Product[];
-  modifierGroups: ModifierGroup[];
-};
-
-const INITIAL_STATE: DashboardState = {
-  categories: [],
-  products: [],
-  modifierGroups: []
-};
 
 export default function AdminHomePage() {
   const [session, setSession] = useState<AdminSession | null>(null);
@@ -391,74 +348,65 @@ export default function AdminHomePage() {
 
   if (isBootstrapping) {
     return (
-      <main style={styles.shell}>
-        <section style={styles.authCard}>
-          <p style={styles.eyebrow}>Tuckinn Commerce Admin</p>
-          <h1 style={styles.heroTitle}>Restoring session</h1>
-          <p style={styles.mutedText}>Checking admin credentials against the API.</p>
-        </section>
-      </main>
+      <AdminAuthShell
+        isBootstrapping
+        email={email}
+        password={password}
+        error={error}
+        isPending={isPending}
+        apiBaseUrl={API_BASE_URL}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+        onSubmit={handleLogin}
+      />
     );
   }
 
   if (!session) {
     return (
-      <main style={styles.shell}>
-        <section style={styles.authCard}>
-          <p style={styles.eyebrow}>Tuckinn Commerce Admin</p>
-          <h1 style={styles.heroTitle}>Admin Portal</h1>
-          <p style={styles.mutedText}>
-            Sign in to manage categories, products, modifier groups, and merchandising
-            structure.
-          </p>
-          <form onSubmit={handleLogin} style={styles.form}>
-            <label style={styles.label}>
-              Staff email
-              <input
-                style={styles.input}
-                type="email"
-                value={email}
-                onChange={event => setEmail(event.target.value)}
-                required
-              />
-            </label>
-            <label style={styles.label}>
-              Password
-              <input
-                style={styles.input}
-                type="password"
-                value={password}
-                onChange={event => setPassword(event.target.value)}
-                required
-              />
-            </label>
-            {error ? <p style={styles.error}>{error}</p> : null}
-            <button style={styles.primaryButton} type="submit" disabled={isPending}>
-              {isPending ? "Signing in..." : "Open Admin Portal"}
-            </button>
-            <p style={styles.apiHint}>API target: {API_BASE_URL}</p>
-          </form>
-        </section>
-      </main>
+      <AdminAuthShell
+        isBootstrapping={false}
+        email={email}
+        password={password}
+        error={error}
+        isPending={isPending}
+        apiBaseUrl={API_BASE_URL}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+        onSubmit={handleLogin}
+      />
     );
   }
 
   return (
     <main style={styles.shell}>
       <section style={styles.header}>
-        <div>
-          <p style={styles.eyebrow}>Catalog + Modifiers</p>
-          <h1 style={styles.heroTitle}>Commerce Control Panel</h1>
-          <p style={styles.mutedText}>
-            Signed in as {session.user.firstName} {session.user.lastName}
-          </p>
+        <div style={styles.headerBrand}>
+          <div style={styles.brandLogoFrame}>
+            <Image src="/logo.jpg" alt="Tuckinn Proper logo" fill sizes="86px" priority />
+          </div>
+          <div style={styles.headerLead}>
+            <p style={styles.eyebrow}>Tuckinn Proper Admin</p>
+            <h1 style={styles.heroTitle}>Operations Control Panel</h1>
+            <p style={styles.mutedText}>
+              Signed in as {session.user.firstName} {session.user.lastName}. Manage the live
+              catalog, products, media, and modifier structure from one place.
+            </p>
+            <div style={styles.statusPillRow}>
+              <span style={styles.statusPill}>Categories {dashboard.categories.length}</span>
+              <span style={styles.statusPill}>Products {dashboard.products.length}</span>
+              <span style={styles.statusPill}>
+                Modifier groups {dashboard.modifierGroups.length}
+              </span>
+            </div>
+          </div>
         </div>
         <div style={styles.headerActions}>
           <button
             style={styles.secondaryButton}
             onClick={() => void loadDashboardWithSession(session)}
           >
-            Refresh
+            Refresh data
           </button>
           <button style={styles.secondaryButton} onClick={handleLogout}>
             Sign out
@@ -1184,356 +1132,3 @@ export default function AdminHomePage() {
     </main>
   );
 }
-
-function Panel({
-  title,
-  children
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section style={styles.panel}>
-      <h2 style={styles.panelTitle}>{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={styles.statCard}>
-      <span style={styles.statLabel}>{label}</span>
-      <strong style={styles.statValue}>{value}</strong>
-    </div>
-  );
-}
-
-function TextInput({
-  label,
-  value,
-  onChange
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label style={styles.label}>
-      {label}
-      <input style={styles.input} value={value} onChange={event => onChange(event.target.value)} />
-    </label>
-  );
-}
-
-function TextArea({
-  label,
-  value,
-  onChange
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label style={styles.label}>
-      {label}
-      <textarea
-        style={styles.textarea}
-        value={value}
-        onChange={event => onChange(event.target.value)}
-      />
-    </label>
-  );
-}
-
-function SelectInput({
-  label,
-  value,
-  onChange,
-  options
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-}) {
-  return (
-    <label style={styles.label}>
-      {label}
-      <select style={styles.select} value={value} onChange={event => onChange(event.target.value)}>
-        {options.map(option => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function CheckboxInput({
-  label,
-  checked,
-  onChange
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label style={styles.checkboxLabel}>
-      <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />
-      {label}
-    </label>
-  );
-}
-
-function FileInput({
-  label,
-  onChange
-}: {
-  label: string;
-  onChange: (file: File) => void;
-}) {
-  return (
-    <label style={styles.label}>
-      {label}
-      <input
-        style={styles.input}
-        type="file"
-        accept="image/*"
-        onChange={event => {
-          const file = event.target.files?.[0];
-          if (file) {
-            onChange(file);
-          }
-          event.currentTarget.value = "";
-        }}
-      />
-    </label>
-  );
-}
-
-function formatCurrency(value: number | string) {
-  const amount = Number(value ?? 0);
-  return `EUR ${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"}`;
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  shell: {
-    maxWidth: 1480,
-    margin: "0 auto",
-    padding: "32px 24px 72px"
-  },
-  authCard: {
-    maxWidth: 560,
-    margin: "10vh auto 0",
-    padding: 32,
-    borderRadius: 28,
-    background: "linear-gradient(180deg, rgba(27,18,18,0.98), rgba(16,11,11,0.98))",
-    border: "1px solid rgba(255,255,255,0.08)",
-    boxShadow: "0 28px 70px rgba(0,0,0,0.34)"
-  },
-  eyebrow: {
-    margin: 0,
-    color: "#f08a7d",
-    textTransform: "uppercase",
-    letterSpacing: "0.16em",
-    fontSize: 12
-  },
-  heroTitle: {
-    margin: "12px 0 8px",
-    fontSize: "clamp(2.2rem, 4vw, 3.8rem)",
-    lineHeight: 1.02
-  },
-  mutedText: {
-    margin: 0,
-    color: "#b4a59f",
-    lineHeight: 1.55
-  },
-  form: {
-    display: "grid",
-    gap: 16
-  },
-  label: {
-    display: "grid",
-    gap: 8,
-    fontSize: 14,
-    color: "#e7d7cf"
-  },
-  checkboxLabel: {
-    display: "flex",
-    gap: 10,
-    alignItems: "center",
-    color: "#e7d7cf"
-  },
-  input: {
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.03)",
-    color: "#f6eee6",
-    padding: "14px 16px"
-  },
-  textarea: {
-    minHeight: 90,
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.03)",
-    color: "#f6eee6",
-    padding: "14px 16px",
-    resize: "vertical"
-  },
-  select: {
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "#1d1414",
-    color: "#f6eee6",
-    padding: "14px 16px"
-  },
-  primaryButton: {
-    border: 0,
-    borderRadius: 16,
-    background: "linear-gradient(135deg, #c63b2d, #e34c3b)",
-    color: "white",
-    padding: "14px 16px",
-    fontWeight: 700
-  },
-  secondaryButton: {
-    borderRadius: 14,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.04)",
-    color: "#f6eee6",
-    padding: "12px 15px"
-  },
-  dangerButton: {
-    borderRadius: 14,
-    border: "1px solid rgba(255,107,107,0.35)",
-    background: "rgba(146,31,31,0.22)",
-    color: "#ffd2d2",
-    padding: "12px 15px"
-  },
-  error: {
-    color: "#ff9d93",
-    margin: "0 0 16px"
-  },
-  success: {
-    color: "#89e3b0",
-    margin: "0 0 16px"
-  },
-  apiHint: {
-    margin: 0,
-    color: "#8d7d77",
-    fontSize: 12
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 16,
-    alignItems: "end",
-    flexWrap: "wrap",
-    marginBottom: 24
-  },
-  headerActions: {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap"
-  },
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: 14,
-    marginBottom: 24
-  },
-  statCard: {
-    padding: 18,
-    borderRadius: 20,
-    background: "rgba(255,255,255,0.03)",
-    border: "1px solid rgba(255,255,255,0.08)"
-  },
-  statLabel: {
-    display: "block",
-    color: "#b4a59f",
-    marginBottom: 8
-  },
-  statValue: {
-    fontSize: 28
-  },
-  layoutGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-    gap: 20
-  },
-  column: {
-    display: "grid",
-    gap: 20,
-    alignContent: "start"
-  },
-  panel: {
-    display: "grid",
-    gap: 16,
-    padding: 22,
-    borderRadius: 24,
-    background: "linear-gradient(180deg, rgba(29,20,20,0.98), rgba(15,10,10,0.98))",
-    border: "1px solid rgba(255,255,255,0.08)"
-  },
-  panelTitle: {
-    margin: 0,
-    fontSize: 22
-  },
-  listStack: {
-    display: "grid",
-    gap: 12
-  },
-  listCard: {
-    padding: "14px 16px",
-    borderRadius: 16,
-    background: "rgba(255,255,255,0.03)",
-    border: "1px solid rgba(255,255,255,0.05)"
-  },
-  itemHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 16,
-    alignItems: "flex-start",
-    marginBottom: 12
-  },
-  inlineActions: {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap"
-  },
-  chipRow: {
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-    marginBottom: 12
-  },
-  chipButton: {
-    borderRadius: 999,
-    border: "1px solid rgba(255,255,255,0.08)",
-    background: "rgba(255,255,255,0.04)",
-    color: "#f6eee6",
-    padding: "8px 12px"
-  },
-  productImagePreview: {
-    width: 120,
-    height: 120,
-    objectFit: "cover",
-    borderRadius: 16,
-    marginTop: 10,
-    border: "1px solid rgba(255,255,255,0.08)"
-  },
-  optionList: {
-    display: "grid",
-    gap: 12
-  },
-  optionCard: {
-    padding: 14,
-    borderRadius: 14,
-    background: "rgba(255,255,255,0.025)",
-    border: "1px solid rgba(255,255,255,0.05)",
-    display: "grid",
-    gap: 12
-  }
-};

@@ -1,4 +1,11 @@
+const API_BASE = window.TUCKINN_API_BASE || 'http://localhost:3200/api';
+
 window.tuckinn = function() {
+    const storedCartId = (() => {
+        try { return localStorage.getItem('tuckinn_cart_id'); }
+        catch (error) { return null; }
+    })();
+
     return {
         view: 'home',
         isLoading: true,
@@ -7,7 +14,8 @@ window.tuckinn = function() {
         builderType: '',
         builderStep: 1,
         selectedTier: null,
-        cart: JSON.parse(localStorage.getItem('tuckinn_cart')) || [],
+        cart: [],
+        cartId: storedCartId,
         orderType: 'collect',
         checkoutForm: {
             address: '',
@@ -16,14 +24,19 @@ window.tuckinn = function() {
         specialInstructions: '',
         orderSuccess: null,
         toasts: [],
-        currentBuild: { id: null, type: '', selections: {}, price: 0, tier: null },
-        
+        currentBuild: { id: null, type: '', selections: {}, price: 0, tier: null, selectedOptionIds: [] },
+        tableNumber: null,
+        isTableLocked: false,
+        pendingView: null,
+        pendingCategory: null,
+
         sandwichTiers: {
             premium: { price: 6.45, limits: { 'Choose Bread': 1, 'The Protein': 1, 'Add Cheese': 1, 'Fresh Veg': 2, 'Signature Sauces': 1 } },
             deluxe: { price: 8.95, limits: { 'Choose Bread': 1, 'The Protein': 2, 'Add Cheese': 2, 'Fresh Veg': 3, 'Signature Sauces': 1 } }
         },
 
         fullMenu: {},
+        rawCatalog: null,
 
         sandwichSteps: [
             { id: 'Choose Bread', options: ['White Bread', 'Brown Bread', 'White Roll', 'Brown Roll', 'Baguette', 'Wrap', 'Pitta Bread', 'Bagel', 'Bakers Bread Of The Day'] },
@@ -34,7 +47,22 @@ window.tuckinn = function() {
         ],
 
         init() {
-            this.$watch('cart', val => localStorage.setItem('tuckinn_cart', JSON.stringify(val)));
+            const urlParams = new URLSearchParams(window.location.search);
+            const tableParam = urlParams.get('table');
+            const viewParam = urlParams.get('view');
+            const categoryParam = urlParams.get('category');
+            if (tableParam) {
+                this.tableNumber = parseInt(tableParam);
+                this.isTableLocked = true;
+                this.orderType = 'instore';
+            }
+            if (viewParam) this.pendingView = viewParam;
+            if (categoryParam) this.pendingCategory = categoryParam;
+
+            this.$watch('cart', val => {
+                localStorage.setItem('tuckinn_cart', JSON.stringify(val));
+                localStorage.setItem('tuckinn_cart_id', this.cartId || '');
+            });
             this.$watch('currentBuild.selections', () => this.updateSandwichPreview());
             this.$watch('builderStep', () => this.$nextTick(() => this.updateSandwichPreview()));
             this.loadMenu();
@@ -43,24 +71,67 @@ window.tuckinn = function() {
         async loadMenu() {
             this.isLoading = true;
             try {
-                const res = await fetch('/api/menu');
-                const menu = await res.json();
-                if (menu && Object.keys(menu).length > 0) {
-                    this.fullMenu = menu;
-                } else {
-                    // Seed if empty
-                    await fetch('/api/seed-menu', { method: 'POST' });
-                    const res2 = await fetch('/api/menu');
-                    this.fullMenu = await res2.json();
+                const res = await fetch(`${API_BASE}/catalog/public?locationCode=main`);
+                const data = await res.json();
+                if (data && data.categories) {
+                    this.rawCatalog = data;
+                    const transformed = {};
+                    for (const cat of data.categories) {
+                        transformed[cat.name] = cat.products.map(p => ({
+                            name: p.name,
+                            desc: p.shortDescription || '',
+                            price: (p.variants.find(v => v.isDefault) || p.variants[0] || {}).priceAmount || 0,
+                            _slug: p.slug,
+                            _id: p.id,
+                            _modifierGroups: p.modifierGroups || [],
+                            _variantId: (p.variants.find(v => v.isDefault) || p.variants[0] || {}).id || null
+                        }));
+                    }
+                    this.fullMenu = transformed;
                 }
-                // Add justAdded prop to each item
                 Object.values(this.fullMenu).forEach(items => {
                     items.forEach(item => item.justAdded = false);
                 });
+                this.applyPendingRoute();
             } catch (e) {
                 console.error('Menu load error', e);
+                this.showToast('Menu could not be loaded.', 'error');
             }
             this.isLoading = false;
+        },
+
+        async ensureCart() {
+            if (this.cartId) return this.cartId;
+            try {
+                const body = { locationCode: 'main' };
+                if (this.tableNumber) {
+                    body.diningTableQrSlug = 'table-' + this.tableNumber;
+                }
+                const res = await fetch(`${API_BASE}/carts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                this.cartId = data.id;
+                return data.id;
+            } catch (e) {
+                console.error('Cart creation error', e);
+                this.showToast('Could not create basket.', 'error');
+                return null;
+            }
+        },
+
+        syncCartFromServer(cartData) {
+            if (!cartData || !cartData.items) return;
+            this.cart = cartData.items.map(item => ({
+                id: item.id,
+                name: item.itemName,
+                price: item.quantity > 0 ? item.lineTotalAmount / item.quantity : item.unitPriceAmount,
+                quantity: item.quantity,
+                desc: (item.modifiers || []).map(m => m.modifierOptionName).join(', '),
+                _itemName: item.itemName
+            }));
         },
 
         startBuilder(type) {
@@ -74,7 +145,7 @@ window.tuckinn = function() {
 
         selectTier(tier) {
             this.builderType = 'sandwich';
-            this.currentBuild = { id: Date.now(), type: 'sandwich', tier: tier, selections: {}, price: this.sandwichTiers[tier].price };
+            this.currentBuild = { id: Date.now(), type: 'sandwich', tier: tier, selections: {}, price: this.sandwichTiers[tier].price, selectedOptionIds: [] };
             this.builderStep = 1;
             this.view = 'build';
             this.$nextTick(() => this.updateSandwichPreview());
@@ -100,7 +171,10 @@ window.tuckinn = function() {
                 if (idx > -1) selections.splice(idx, 1);
                 else {
                     const limit = (this.currentBuild.tier) ? this.sandwichTiers[this.currentBuild.tier].limits[stepId] : 99;
-                    if (selections.length >= limit) return alert(`Maximum allowed: ${limit}`);
+                    if (selections.length >= limit) {
+                        this.showToast(`Maximum allowed: ${limit}`, 'error');
+                        return;
+                    }
                     selections.push(option);
                 }
             } else {
@@ -109,6 +183,10 @@ window.tuckinn = function() {
         },
 
         nextStep() {
+            if (!this.isCurrentStepComplete()) {
+                this.showToast('Select at least one option before continuing.', 'error');
+                return;
+            }
             if (this.builderStep < this.totalSteps) this.builderStep++;
             else this.addToCart();
             this.$nextTick(() => this.updateSandwichPreview());
@@ -120,14 +198,123 @@ window.tuckinn = function() {
             this.$nextTick(() => this.updateSandwichPreview());
         },
 
-        addToCart(item = null) {
-            if (item) this.cart.push({ id: Date.now(), ...item });
-            else {
+        async addToCart(item = null) {
+            if (item) {
+                await this.addPlatformItem(item);
+            } else {
                 const name = this.currentBuild.tier === 'premium' ? 'Premium Sandwich' : 'Deluxe Sandwich';
-                this.cart.push({ ...this.currentBuild, name: name });
+                const buildItem = {
+                    id: Date.now(),
+                    ...this.currentBuild,
+                    name: name,
+                    _slug: this.currentBuild.tier === 'premium' ? 'premium-sandwich' : 'deluxe-sandwich',
+                    _modifierGroups: [],
+                    _variantId: null
+                };
+                await this.addPlatformItem(buildItem);
             }
-            this.showToast('Added to basket!', 'success');
-            this.view = 'cart';
+        },
+
+        async addPlatformItem(item) {
+            try {
+                const cartId = await this.ensureCart();
+                if (!cartId) return;
+
+                const body = {
+                    productSlug: item._slug,
+                    quantity: item.quantity || 1,
+                };
+
+                if (item._variantId) {
+                    body.variantId = item._variantId;
+                }
+
+                if (item._modifierGroups && item._modifierGroups.length > 0) {
+                    const selectedIds = [];
+                    for (const group of item._modifierGroups) {
+                        for (const option of group.options) {
+                            if (option.isDefault) {
+                                selectedIds.push(option.id);
+                            }
+                        }
+                    }
+                    if (selectedIds.length > 0) {
+                        body.selectedOptionIds = selectedIds;
+                    }
+                }
+
+                const res = await fetch(`${API_BASE}/carts/${cartId}/items`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || data.error || 'Failed to add item');
+                this.syncCartFromServer(data);
+                this.showToast('Added to basket!', 'success');
+                this.view = 'cart';
+            } catch (e) {
+                console.error('Add to cart error', e);
+                this.showToast('Failed to add item: ' + e.message, 'error');
+            }
+        },
+
+        async removeFromCart(index) {
+            if (!this.cartId || !this.cart[index]) return;
+            try {
+                const itemId = this.cart[index].id;
+                const res = await fetch(`${API_BASE}/carts/${this.cartId}/items/${itemId}`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.syncCartFromServer(data);
+                } else {
+                    this.cart.splice(index, 1);
+                }
+            } catch (e) {
+                this.cart.splice(index, 1);
+            }
+        },
+
+        async qtyIncrease(index) {
+            if (!this.cartId || !this.cart[index]) return;
+            try {
+                const itemId = this.cart[index].id;
+                const newQty = (this.cart[index].quantity || 1) + 1;
+                const res = await fetch(`${API_BASE}/carts/${this.cartId}/items/${itemId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quantity: newQty })
+                });
+                const data = await res.json();
+                if (res.ok) this.syncCartFromServer(data);
+                else this.cart[index].quantity = newQty;
+            } catch (e) {
+                this.cart[index].quantity = (this.cart[index].quantity || 1) + 1;
+            }
+        },
+
+        async qtyDecrease(index) {
+            if (!this.cartId || !this.cart[index]) return;
+            if (this.cart[index].quantity > 1) {
+                try {
+                    const itemId = this.cart[index].id;
+                    const newQty = this.cart[index].quantity - 1;
+                    const res = await fetch(`${API_BASE}/carts/${this.cartId}/items/${itemId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ quantity: newQty })
+                    });
+                    const data = await res.json();
+                    if (res.ok) this.syncCartFromServer(data);
+                    else this.cart[index].quantity = newQty;
+                } catch (e) {
+                    this.cart[index].quantity--;
+                }
+            } else {
+                await this.removeFromCart(index);
+            }
         },
 
         showToast(message, type = 'info') {
@@ -141,6 +328,59 @@ window.tuckinn = function() {
         formatSelections(item) {
             if (!item.selections) return item.desc || '';
             return Object.values(item.selections).flat().join(', ');
+        },
+
+        formatMoney(value) {
+            return new Intl.NumberFormat('en-IE', {
+                style: 'currency',
+                currency: 'EUR'
+            }).format(Number(value) || 0);
+        },
+
+        homeCategories() {
+            return Object.keys(this.fullMenu || {}).slice(0, 4);
+        },
+
+        homeHighlights() {
+            return Object.entries(this.fullMenu || {})
+                .slice(0, 3)
+                .map(([category, items]) => {
+                    const featured = Array.isArray(items) ? items[0] : null;
+                    if (!featured) return null;
+                    return {
+                        category,
+                        name: featured.name,
+                        desc: featured.desc,
+                        price: featured.price
+                    };
+                })
+                .filter(Boolean);
+        },
+
+        categorySummary(category) {
+            const copy = {
+                'Meal Deals': 'Fast combinations for lunch rushes and group orders.',
+                'Originals': 'Signature house builds made for the main event.',
+                'Smoothies': 'Fresh blends with premium fruit-forward flavour.',
+                'Milkshakes': 'Thick, indulgent shakes finished to order.',
+                'Drinks & Coffees': 'Coffee bar staples, juices, and fridge picks.',
+                'Snacks & Sweets': 'Add-ons for impulse buys and bundle upgrades.'
+            };
+            return copy[category] || 'Explore the full range and order in seconds.';
+        },
+
+        applyPendingRoute() {
+            if (this.pendingCategory && this.fullMenu[this.pendingCategory]) {
+                this.activeCategory = this.pendingCategory;
+            }
+            if (!this.pendingView) return;
+            const allowedViews = new Set(['home', 'full-menu', 'cart', 'account']);
+            if (!allowedViews.has(this.pendingView)) return;
+            if (this.pendingView === 'full-menu' && this.activeCategory) {
+                this.view = 'full-menu';
+                return;
+            }
+            this.view = this.pendingView;
         },
 
         openCategory(cat) {
@@ -180,6 +420,14 @@ window.tuckinn = function() {
             return sel.length >= limit && !sel.includes(option);
         },
 
+        isCurrentStepComplete() {
+            const step = this.currentStep;
+            if (!step) return true;
+            const selection = this.currentBuild.selections[step.id];
+            if (Array.isArray(selection)) return selection.length > 0;
+            return Boolean(selection);
+        },
+
         updateSandwichPreview() {
             const visual = document.getElementById('sandwichVisual');
             const tags = document.getElementById('sandwichTags');
@@ -193,42 +441,32 @@ window.tuckinn = function() {
             const sauces = sels['Signature Sauces'] || [];
 
             let html = '';
-            // Bottom bread
             html += `<div class="sandwich-layer layer-bread-bottom"></div>`;
-            // Veggies
             (Array.isArray(veggies) ? veggies : [veggies]).forEach(v => {
                 if (!v) return;
                 const cls = this.getVegClass(v);
                 html += `<div class="sandwich-layer layer-veg ${cls}"></div>`;
             });
-            // Sauces
             (Array.isArray(sauces) ? sauces : [sauces]).forEach(s => {
                 if (!s) return;
                 const cls = this.getSauceClass(s);
                 html += `<div class="sandwich-layer layer-sauce ${cls}"></div>`;
             });
-            // Cheeses
             cheeses.forEach(c => {
                 if (!c) return;
                 const cls = this.getCheeseClass(c);
                 html += `<div class="sandwich-layer layer-cheese ${cls}"></div>`;
             });
-            // Proteins
             proteins.forEach(p => {
                 if (!p) return;
                 const cls = this.getProteinClass(p);
                 html += `<div class="sandwich-layer layer-protein ${cls}"></div>`;
             });
-            // Top bread
             html += `<div class="sandwich-layer layer-bread-top"></div>`;
-
             visual.innerHTML = html;
 
-            // Tags
             let tagsHtml = '';
-            if (bread) {
-                tagsHtml += `<div class="tag-category">Bread</div><span class="sandwich-ingredient-tag">${bread}</span>`;
-            }
+            if (bread) tagsHtml += `<div class="tag-category">Bread</div><span class="sandwich-ingredient-tag">${bread}</span>`;
             if (proteins.length) {
                 tagsHtml += `<div class="tag-category mt-2">Protein</div>`;
                 proteins.forEach(p => { if (p) tagsHtml += `<span class="sandwich-ingredient-tag">${p}</span>`; });
@@ -249,100 +487,83 @@ window.tuckinn = function() {
         },
 
         getVegClass(v) {
-            const map = {
-                'Lettuce': 'veg-lettuce', 'Tomato': 'veg-tomato', 'Red Onion': 'veg-red-onion',
-                'Cucumber': 'veg-cucumber', 'Spinach': 'veg-spinach', 'Rocket': 'veg-rocket',
-                'Avocado': 'veg-avocado', 'Peppers': 'veg-peppers', 'Jalapenos': 'veg-jalapenos'
-            };
+            const map = { 'Lettuce': 'veg-lettuce', 'Tomato': 'veg-tomato', 'Red Onion': 'veg-red-onion', 'Cucumber': 'veg-cucumber', 'Spinach': 'veg-spinach', 'Rocket': 'veg-rocket', 'Avocado': 'veg-avocado', 'Peppers': 'veg-peppers', 'Jalapenos': 'veg-jalapenos' };
             return map[v] || 'veg-default';
         },
-
         getProteinClass(p) {
-            const map = {
-                'Chicken': 'protein-chicken', 'Roast Beef': 'protein-beef', 'Corn Beef': 'protein-beef',
-                'Tuna': 'protein-tuna', 'Smoked Salmon': 'protein-salmon', 'Bacon': 'protein-bacon',
-                'Ham': 'protein-ham', 'Honey Roast Ham': 'protein-ham'
-            };
+            const map = { 'Chicken': 'protein-chicken', 'Roast Beef': 'protein-beef', 'Corn Beef': 'protein-beef', 'Tuna': 'protein-tuna', 'Smoked Salmon': 'protein-salmon', 'Bacon': 'protein-bacon', 'Ham': 'protein-ham', 'Honey Roast Ham': 'protein-ham' };
             return map[p] || 'protein-default';
         },
-
         getCheeseClass(c) {
-            const map = {
-                'Cheddar': 'cheese-cheddar', 'Feta': 'cheese-feta', 'Cream Cheese': 'cheese-cream-cheese',
-                'Gouda': 'cheese-gouda', 'Mozzarella': 'cheese-mozzarella'
-            };
+            const map = { 'Cheddar': 'cheese-cheddar', 'Feta': 'cheese-feta', 'Cream Cheese': 'cheese-cream-cheese', 'Gouda': 'cheese-gouda', 'Mozzarella': 'cheese-mozzarella' };
             return map[c] || 'cheese-cheddar';
         },
-
         getSauceClass(s) {
-            const map = {
-                'Mayonnaise': 'sauce-mayonnaise', 'Alioli': 'sauce-alioli',
-                'English Mustard': 'sauce-mustard', 'Dijon Mustard': 'sauce-mustard',
-                'Pesto': 'sauce-pesto', 'Bbq Sauce': 'sauce-bbq', 'Tomato Ketchup': 'sauce-ketchup',
-                'Sweet Chilli': 'sauce-sweet-chilli', 'Hot Sauce': 'sauce-hot-sauce'
-            };
+            const map = { 'Mayonnaise': 'sauce-mayonnaise', 'Alioli': 'sauce-alioli', 'English Mustard': 'sauce-mustard', 'Dijon Mustard': 'sauce-mustard', 'Pesto': 'sauce-pesto', 'Bbq Sauce': 'sauce-bbq', 'Tomato Ketchup': 'sauce-ketchup', 'Sweet Chilli': 'sauce-sweet-chilli', 'Hot Sauce': 'sauce-hot-sauce' };
             return map[s] || 'sauce-default';
         },
 
-        removeFromCart(index) {
-            this.cart.splice(index, 1);
-        },
-
-        qtyIncrease(index) {
-            this.cart[index].quantity = (this.cart[index].quantity || 1) + 1;
-        },
-
-        qtyDecrease(index) {
-            if (this.cart[index].quantity > 1) {
-                this.cart[index].quantity--;
-            } else {
-                this.cart.splice(index, 1);
-            }
-        },
-
         get cartTotal() {
-            return this.cart.reduce((sum, i) => sum + (parseFloat(i.price) * (i.quantity || 1)), 0).toFixed(2);
+            if (this.cartId && this.cart.length > 0) {
+                return this.cart.reduce((sum, i) => sum + (parseFloat(i.price) * (i.quantity || 1)), 0).toFixed(2);
+            }
+            return '0.00';
         },
 
         async processOrder() {
-            if (!this.checkoutForm.address) {
-                alert('Please enter your name');
+            const customerName = (this.checkoutForm.address || '').trim();
+            const phone = (this.checkoutForm.phone || '').trim();
+
+            if (this.cart.length === 0) {
+                this.showToast('Your basket is empty.', 'error');
                 return;
             }
-            if (this.orderType === 'collect' && !this.checkoutForm.phone) {
-                alert('Please enter your phone number');
+            if (!customerName) {
+                this.showToast('Please enter your name.', 'error');
                 return;
             }
+            if (this.orderType === 'collect' && phone.length < 7) {
+                this.showToast('Please enter a valid phone number.', 'error');
+                return;
+            }
+
             try {
-                const orderNum = 'TK' + Date.now().toString().slice(-6);
-                const res = await fetch('/api/orders', {
+                const cartId = await this.ensureCart();
+                if (!cartId) {
+                    this.showToast('Basket error. Please try again.', 'error');
+                    return;
+                }
+
+                const res = await fetch(`${API_BASE}/checkout/start`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        order_number: orderNum,
-                        customer_name: this.checkoutForm.address,
-                        items: this.cart,
-                        total: parseFloat(this.cartTotal),
-                        phone: this.orderType === 'collect' ? this.checkoutForm.phone : '',
-                        order_type: this.orderType,
-                        special_instructions: this.specialInstructions
+                        cartId: cartId,
+                        idempotencyKey: crypto.randomUUID ? crypto.randomUUID() : 'tk-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+                        orderKind: this.orderType,
+                        customerName: customerName,
+                        customerPhone: this.orderType === 'collect' ? phone : '',
+                        specialInstructions: this.specialInstructions || undefined
                     })
                 });
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Order failed');
+                if (!res.ok) throw new Error(data.message || data.error || 'Order failed');
+
                 this.orderSuccess = {
-                    order_number: data.order_number,
-                    items: this.cart,
-                    total: this.cartTotal,
-                    customer_name: this.checkoutForm.address,
-                    order_type: this.orderType
+                    order_number: data.order?.orderNumber || '',
+                    total: data.order?.totalAmount || 0,
+                    customer_name: data.order?.customerName || customerName,
+                    order_type: data.order?.orderKind || this.orderType,
+                    items: this.cart.slice()
                 };
                 this.cart = [];
+                this.cartId = null;
                 this.specialInstructions = '';
                 this.checkoutForm = { address: '', phone: '' };
+                localStorage.removeItem('tuckinn_cart_id');
                 this.view = 'success';
             } catch (err) {
-                alert('Order failed: ' + err.message);
+                this.showToast('Order failed: ' + err.message, 'error');
             }
         }
     };

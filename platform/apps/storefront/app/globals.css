@@ -71,15 +71,17 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body { overflow-x: hidden; }
+html { overflow-x: hidden; height: auto; }
 body {
   font-family: var(--font);
   background: var(--bg-body-gradient);
-  background-attachment: fixed;
+  background-attachment: scroll;
   color: var(--text);
   -webkit-tap-highlight-color: transparent;
   min-height: 100vh;
-  overscroll-behavior-y: contain;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (min-width: 768px) {

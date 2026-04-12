@@ -1,0 +1,22 @@
+{
+  "name": "tuckinn-backend",
+  "version": "1.0.0",
+  "description": "Tuckinn Proper - Full backend with admin panel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sql.js": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^9.0.0",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "qrcode": "^1.5.3",
+    "bcryptjs": "^2.4.3",
+    "express-rate-limit": "^7.1.5",
+    "express-session": "^1.17.3"
+  }
+}

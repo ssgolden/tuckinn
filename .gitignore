@@ -1,3 +1,38 @@
 node_modules/
-database.sqlite
 package-lock.json
+*.log
+
+# Secrets — NEVER commit .env files
+.env
+.env.local
+.env.production
+.env.*.local
+**/.env
+**/.env.local
+**/.env.production
+**/.env.*.local
+
+# Databases — runtime data, not source
+*.sqlite
+*.db
+*.sqlite3
+
+# Backups — use git/VPS snapshots instead
+backup/
+backup_*/
+deployment_package_*/
+
+# Build artifacts
+platform/.turbo/
+platform/apps/mobile/.expo/
+platform/apps/storefront/tsconfig.tsbuildinfo
+platform/apps/api/src/generated/
+
+# Temp files
+tmp-*.png
+
+# Credentials — no plain-text secrets
+*.pem
+*.key
+login.txt
+credentials.*

@@ -4,6 +4,7 @@ export const ADMIN_APP_URL =
   process.env.NEXT_PUBLIC_ADMIN_APP_URL || "http://localhost:3101";
 export const STAFF_APP_URL =
   process.env.NEXT_PUBLIC_STAFF_APP_URL || "http://localhost:3102";
+export const API_APP_URL = API_BASE_URL;
 
 export class ApiError extends Error {
   constructor(

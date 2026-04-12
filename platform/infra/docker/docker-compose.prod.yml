@@ -114,6 +114,8 @@ services:
       args:
         APP_NAME: storefront
         NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}/api
+        NEXT_PUBLIC_ADMIN_APP_URL: https://${ADMIN_DOMAIN}
+        NEXT_PUBLIC_STAFF_APP_URL: https://${STAFF_DOMAIN}
     restart: unless-stopped
     environment:
       HOSTNAME: 0.0.0.0
@@ -134,6 +136,8 @@ services:
       args:
         APP_NAME: admin
         NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}/api
+        NEXT_PUBLIC_ADMIN_APP_URL: https://${ADMIN_DOMAIN}
+        NEXT_PUBLIC_STAFF_APP_URL: https://${STAFF_DOMAIN}
     restart: unless-stopped
     environment:
       HOSTNAME: 0.0.0.0
@@ -154,6 +158,8 @@ services:
       args:
         APP_NAME: staff
         NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}/api
+        NEXT_PUBLIC_ADMIN_APP_URL: https://${ADMIN_DOMAIN}
+        NEXT_PUBLIC_STAFF_APP_URL: https://${STAFF_DOMAIN}
     restart: unless-stopped
     environment:
       HOSTNAME: 0.0.0.0

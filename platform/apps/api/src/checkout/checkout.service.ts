@@ -1,3 +1,29 @@
+type CheckoutResult = {
+  order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    orderKind: string;
+    customerName: string;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    deliveryAddress: Record<string, unknown> | null;
+    subtotalAmount: number;
+    discountAmount: number;
+    taxAmount: number;
+    totalAmount: number;
+  };
+  payment: {
+    id: string;
+    provider: string;
+    status: string;
+    currencyCode: string;
+    checkoutUrl: string | null;
+    clientSecret: string | null;
+    publishableKey: string | null;
+  };
+};
+
 import {
   BadRequestException,
   Injectable
@@ -63,10 +89,17 @@ export class CheckoutService {
       throw new BadRequestException("In-store orders require a dining table.");
     }
 
+    if (dto.orderKind === "delivery" && !dto.deliveryAddress) {
+      throw new BadRequestException("Delivery orders require a delivery address.");
+    }
+
     const totalMinor = this.toMinorUnits(cart.totalAmount);
     if (totalMinor <= 0) {
       throw new BadRequestException("Cart total must be greater than zero.");
     }
+
+    const deliveryAddress =
+      dto.orderKind === "delivery" ? this.normalizeDeliveryAddress(dto.deliveryAddress) : null;
 
     const checkoutRecord = await this.prisma.$transaction(async tx => {
       const order = await tx.order.create({
@@ -88,7 +121,8 @@ export class CheckoutService {
           specialInstructions: dto.specialInstructions,
           metadata: {
             cartId: cart.id,
-            locationCode
+            locationCode,
+            ...(deliveryAddress ? { deliveryAddress } : {})
           }
         }
       });
@@ -134,29 +168,40 @@ export class CheckoutService {
       };
     });
 
-    const initializedPayment = await this.paymentsService.initializePayment({
+    const checkoutSession = await this.paymentsService.createCheckoutSession({
       paymentId: checkoutRecord.payment.id,
       orderId: checkoutRecord.order.id,
       orderNumber: checkoutRecord.order.orderNumber,
       amountMinor: totalMinor,
       currencyCode: cart.currencyCode,
       idempotencyKey: dto.idempotencyKey,
-      customerEmail: dto.customerEmail
+      customerEmail: dto.customerEmail,
+      customerName: dto.customerName,
+      lineItems: cart.items.map(item => ({
+        name: item.itemName,
+        amount: this.toMinorUnits(item.unitPriceAmount),
+        quantity: item.quantity
+      })),
+      storefrontUrl: this.paymentsService.getStorefrontUrl()
     });
 
     const finalizedCheckout = await this.paymentsService.getCheckoutStateByIdempotencyKey(
       dto.idempotencyKey
     );
 
+    const checkoutUrl = 'checkoutUrl' in checkoutSession ? (checkoutSession as Record<string, unknown>).checkoutUrl as string | null : null;
+
     if (finalizedCheckout) {
+      const base = finalizedCheckout as Record<string, any>;
       return {
-        ...finalizedCheckout,
+        ...base,
         payment: {
-          ...finalizedCheckout.payment,
-          clientSecret: initializedPayment.clientSecret,
-          publishableKey: initializedPayment.publishableKey
+          ...(base.payment as Record<string, unknown>),
+          checkoutUrl,
+          clientSecret: null,
+          publishableKey: null
         }
-      };
+      } as CheckoutResult;
     }
 
     return {
@@ -168,20 +213,22 @@ export class CheckoutService {
         customerName: checkoutRecord.order.customerName,
         customerEmail: checkoutRecord.order.customerEmail,
         customerPhone: checkoutRecord.order.customerPhone,
+        deliveryAddress,
         subtotalAmount: this.toDisplayAmount(checkoutRecord.order.subtotalAmount),
         discountAmount: this.toDisplayAmount(checkoutRecord.order.discountAmount),
         taxAmount: this.toDisplayAmount(checkoutRecord.order.taxAmount),
         totalAmount: this.toDisplayAmount(checkoutRecord.order.totalAmount)
       },
       payment: {
-        id: initializedPayment.payment.id,
-        provider: initializedPayment.payment.provider,
-        status: initializedPayment.payment.status,
-        currencyCode: initializedPayment.payment.currencyCode,
-        clientSecret: initializedPayment.clientSecret,
-        publishableKey: initializedPayment.publishableKey
+        id: checkoutRecord.payment.id,
+        provider: checkoutRecord.payment.provider,
+        status: checkoutRecord.payment.status,
+        currencyCode: checkoutRecord.payment.currencyCode,
+        checkoutUrl,
+        clientSecret: null,
+        publishableKey: null
       }
-    };
+    } as CheckoutResult;
   }
 
   private createOrderNumber() {
@@ -196,5 +243,18 @@ export class CheckoutService {
 
   private toDisplayAmount(value: unknown): number {
     return Number(Number(value ?? 0).toFixed(2));
+  }
+
+  private normalizeDeliveryAddress(address: StartCheckoutDto["deliveryAddress"]) {
+    if (!address) {
+      return null;
+    }
+
+    return {
+      line1: address.line1.trim(),
+      line2: address.line2?.trim() || undefined,
+      city: address.city.trim(),
+      postcode: address.postcode.trim()
+    };
   }
 }

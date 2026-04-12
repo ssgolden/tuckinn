@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tuckinn Staff | Order Board</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -13,17 +13,36 @@
 </head>
 <body x-data="staffBoard" x-cloak>
 
-    <!-- PIN LOGIN SCREEN -->
     <template x-if="!authenticated">
         <div class="pin-screen">
-            <div class="pin-box">
-                <div class="pin-logo">🍽️ TUCKINN STAFF</div>
-                <p class="pin-subtitle">Enter PIN to access order board</p>
+            <div class="pin-shell">
+                <div class="pin-brand-panel">
+                    <img src="logo.jpg" alt="Tuckinn Proper" class="pin-brand-logo">
+                    <span class="pin-badge">Operations Console</span>
+                    <div class="pin-logo">TUCKINN STAFF</div>
+                    <p class="pin-subtitle">Secure access for kitchen, collection, and dine-in order management.</p>
+                    <div class="pin-highlights">
+                        <div class="pin-highlight">
+                            <span class="material-icons">bolt</span>
+                            <span>Live order flow</span>
+                        </div>
+                        <div class="pin-highlight">
+                            <span class="material-icons">query_stats</span>
+                            <span>Service visibility</span>
+                        </div>
+                        <div class="pin-highlight">
+                            <span class="material-icons">shield</span>
+                            <span>Protected staff access</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="pin-box">
+                    <div class="pin-box-kicker">Enter staff PIN</div>
                 <div class="pin-display">
-                    <span class="pin-dot" :class="{ 'filled': pin.length >= 1 }">●</span>
-                    <span class="pin-dot" :class="{ 'filled': pin.length >= 2 }">●</span>
-                    <span class="pin-dot" :class="{ 'filled': pin.length >= 3 }">●</span>
-                    <span class="pin-dot" :class="{ 'filled': pin.length >= 4 }">●</span>
+                    <span class="pin-dot" :class="{ 'filled': pin.length >= 1 }"></span>
+                    <span class="pin-dot" :class="{ 'filled': pin.length >= 2 }"></span>
+                    <span class="pin-dot" :class="{ 'filled': pin.length >= 3 }"></span>
+                    <span class="pin-dot" :class="{ 'filled': pin.length >= 4 }"></span>
                 </div>
                 <p class="pin-error" x-show="pinError" x-text="pinError"></p>
                 <div class="pin-pad">
@@ -34,19 +53,21 @@
                         </button>
                     </template>
                 </div>
+                </div>
             </div>
         </div>
     </template>
 
-    <!-- STAFF DASHBOARD -->
     <template x-if="authenticated">
         <div class="staff-dashboard">
-            <!-- Header -->
             <header class="staff-header">
                 <div class="d-flex justify-content-between align-items-center w-100 px-4">
                     <div class="d-flex align-items-center gap-3">
-                        <span class="staff-logo">🍽️ TUCKINN</span>
-                        <span class="staff-label">STAFF BOARD</span>
+                        <img src="logo.jpg" alt="Tuckinn Proper" class="staff-brand-logo">
+                        <div class="staff-brand-copy">
+                            <span class="staff-logo">TUCKINN</span>
+                            <span class="staff-label">STAFF BOARD</span>
+                        </div>
                     </div>
                     <div class="d-flex align-items-center gap-3">
                         <div class="order-count-badge" :class="{ 'pulse': activeOrders.length > 0 }">
@@ -60,30 +81,27 @@
                 </div>
             </header>
 
-            <!-- Connection Status -->
             <div class="connection-bar" :class="connected ? 'connected' : 'disconnected'">
                 <span class="material-icons" style="font-size:14px;" x-text="connected ? 'wifi' : 'wifi_off'"></span>
                 <span x-text="connected ? 'Live connected' : 'Reconnecting...'"></span>
                 <span x-show="!connected" class="reconnect-spinner"></span>
             </div>
 
-            <!-- Stats Bar -->
             <div class="stats-bar">
                 <div class="stat-item">
                     <span class="stat-value" x-text="todayStats.orders"></span>
                     <span class="stat-label">Orders Today</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value" x-text="'€' + todayStats.revenue"></span>
+                    <span class="stat-value" x-text="formatMoney(todayStats.revenue)"></span>
                     <span class="stat-label">Revenue Today</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value" x-text="avgPrepTime"></span>
-                    <span class="stat-label">Avg Prep</span>
+                    <span class="stat-value" x-text="readyCount"></span>
+                    <span class="stat-label">Ready Now</span>
                 </div>
             </div>
 
-            <!-- Tab Navigation -->
             <div class="tab-nav">
                 <button class="tab-btn" :class="{ 'active': activeTab === 'active' }" @click="activeTab = 'active'">
                     Active <span class="tab-count" x-show="activeOrders.length" x-text="activeOrders.length"></span>
@@ -93,10 +111,7 @@
                 </button>
             </div>
 
-            <!-- Order Grid -->
             <main class="staff-main">
-
-                <!-- Active Orders -->
                 <template x-if="activeTab === 'active'">
                     <div>
                         <template x-if="activeOrders.length === 0">
@@ -110,16 +125,17 @@
                         <div class="orders-grid">
                             <template x-for="order in activeOrders" :key="'active-' + order.id">
                                 <div class="order-card" :class="'status-' + order.status">
-                                    <!-- Urgency indicator for old new orders -->
                                     <div class="urgency-bar" x-show="order.status === 'new' && minsAgo(order.date) > 5"></div>
 
-                                    <!-- Card Header -->
                                     <div class="order-card-header">
                                         <div class="order-number" x-text="'#' + order.order_number"></div>
                                         <div class="order-status-badge" :class="'badge-' + order.status" x-text="order.status.toUpperCase()"></div>
                                     </div>
+                                    <div x-show="order.table_number" class="table-number-badge">
+                                        <span class="material-icons" style="font-size:14px;">table_restaurant</span>
+                                        <span x-text="'Table ' + order.table_number"></span>
+                                    </div>
 
-                                    <!-- Items -->
                                     <div class="order-items">
                                         <template x-for="(item, idx) in order.items" :key="'item-' + idx">
                                             <div class="order-item">
@@ -129,7 +145,6 @@
                                         </template>
                                     </div>
 
-                                    <!-- Customer -->
                                     <div class="order-customer">
                                         <span class="material-icons" style="font-size:16px;">person</span>
                                         <span x-text="order.customer_name || 'Guest'"></span>
@@ -139,25 +154,22 @@
                                         </span>
                                     </div>
 
-                                    <!-- Order Type -->
                                     <div class="order-type-badge" :class="order.order_type === 'instore' ? 'badge-instore' : 'badge-collect'">
-                                        <span x-text="order.order_type === 'instore' ? '🍽️ Dine-in' : '📦 Collect'"></span>
+                                        <span x-text="order.order_type === 'instore' ? 'Dine-in' : 'Collect'"></span>
+                                        <span x-show="order.order_type === 'instore' && order.table_number" x-text="' - Table ' + order.table_number" style="margin-left:4px;"></span>
                                     </div>
 
-                                    <!-- Special Instructions -->
                                     <div x-show="order.special_instructions" class="order-notes">
                                         <span class="material-icons" style="font-size:14px;">notes</span>
                                         <span x-text="order.special_instructions"></span>
                                     </div>
 
-                                    <!-- Time -->
                                     <div class="order-time">
                                         <span class="material-icons" style="font-size:14px;">schedule</span>
                                         <span x-text="timeAgo(order.date)"></span>
                                         <span x-show="minsAgo(order.date) > 3" style="color:#ff6b6b;margin-left:4px;" x-text="'(' + minsAgo(order.date) + 'm)'"></span>
                                     </div>
 
-                                    <!-- Action Button -->
                                     <div class="order-action">
                                         <template x-if="order.status === 'new'">
                                             <button class="action-btn action-start" @click="updateStatus(order.id, 'preparing')">
@@ -184,11 +196,10 @@
                     </div>
                 </template>
 
-                <!-- Order History -->
                 <template x-if="activeTab === 'history'">
                     <div>
                         <div class="history-date-header">
-                            <span x-text="'Today — ' + historyOrders.length + ' orders'"></span>
+                            <span x-text="'Today - ' + historyOrders.length + ' orders'"></span>
                         </div>
 
                         <template x-if="historyOrders.length === 0">
@@ -209,8 +220,8 @@
                                         </div>
                                     </div>
                                     <div class="history-item-right">
-                                        <span class="history-total" x-text="'€' + parseFloat(order.total).toFixed(2)"></span>
-                                        <span class="history-served-badge">✓ Served</span>
+                                        <span class="history-total" x-text="formatMoney(order.total)"></span>
+                                        <span class="history-served-badge">Served</span>
                                     </div>
                                 </div>
                             </template>

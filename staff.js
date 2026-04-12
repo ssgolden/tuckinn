@@ -1,5 +1,3 @@
-const STAFF_PIN = '1234';
-
 document.addEventListener('alpine:init', () => {
     Alpine.data('staffBoard', () => ({
         authenticated: false,
@@ -13,127 +11,225 @@ document.addEventListener('alpine:init', () => {
         activeTab: 'active',
 
         async init() {
-            if (localStorage.getItem('staff_token')) {
-                this.authenticated = true;
-                this.connectSocket();
-                this.loadActiveOrders();
+            await this.restoreSession();
+        },
+
+        async restoreSession() {
+            try {
+                const response = await fetch('/api/staff/session', {
+                    credentials: 'same-origin'
+                });
+                const data = await response.json();
+
+                if (data.authenticated) {
+                    this.authenticated = true;
+                    this.startBoard();
+                }
+            } catch (error) {
+                console.error('Failed to restore staff session:', error);
             }
         },
 
         async login() {
-            if (this.pin === STAFF_PIN) {
+            try {
+                const response = await fetch('/api/staff/login', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin: this.pin })
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Login failed');
+                }
+
                 this.authenticated = true;
                 this.pin = '';
                 this.pinError = '';
-                localStorage.setItem('staff_token', 'staff_' + Date.now());
-                this.connectSocket();
-                this.loadActiveOrders();
-                this.pollInterval = setInterval(() => this.loadActiveOrders(), 5000);
-            } else {
-                this.pinError = 'Invalid PIN';
+                this.startBoard();
+            } catch (error) {
+                this.pinError = error.message;
                 this.pin = '';
             }
         },
 
-        logout() {
+        async logout() {
+            try {
+                await fetch('/api/staff/logout', {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                });
+            } catch (error) {
+                console.error('Failed to log out cleanly:', error);
+            } finally {
+                this.stopBoard();
+                this.pinError = '';
+            }
+        },
+
+        startBoard() {
+            this.loadActiveOrders();
+            this.loadHistory();
+            this.connectSocket();
+
+            if (!this.pollInterval) {
+                this.pollInterval = setInterval(() => {
+                    this.loadActiveOrders();
+                    this.loadHistory();
+                }, 5000);
+            }
+        },
+
+        stopBoard() {
             this.authenticated = false;
             this.pin = '';
-            localStorage.removeItem('staff_token');
+            this.activeOrders = [];
+            this.historyOrders = [];
+            this.connected = false;
+
             if (this.socket) {
                 this.socket.disconnect();
                 this.socket = null;
             }
+
             if (this.pollInterval) {
                 clearInterval(this.pollInterval);
                 this.pollInterval = null;
             }
         },
 
-        connectSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-            const host = window.location.hostname;
-            const port = window.location.port || (protocol === 'https:' ? 443 : 3005);
+        handleUnauthorized() {
+            this.pinError = 'Session expired. Sign in again.';
+            this.stopBoard();
+        },
 
-            this.socket = io(`${protocol}//${host}:${port}`, {
-                transports: ['websocket', 'polling']
+        connectSocket() {
+            if (this.socket) {
+                return;
+            }
+
+            this.socket = io({
+                transports: ['websocket', 'polling'],
+                withCredentials: true
             });
 
             this.socket.on('connect', () => {
                 this.connected = true;
-                this.socket.emit('staff_join');
             });
 
             this.socket.on('disconnect', () => {
                 this.connected = false;
             });
 
-            this.socket.on('new_order', (order) => {
+            this.socket.on('connect_error', error => {
+                this.connected = false;
+                if (error && /unauthorized/i.test(error.message || '')) {
+                    this.handleUnauthorized();
+                }
+            });
+
+            this.socket.on('new_order', order => {
+                if (!order || this.activeOrders.some(existing => existing.id === order.id)) {
+                    return;
+                }
                 this.activeOrders.unshift(order);
                 this.playAlert();
             });
 
-            this.socket.on('order_status_update', (data) => {
+            this.socket.on('order_status_update', data => {
+                if (!data || !data.orderId) {
+                    return;
+                }
+
                 if (data.status === 'served') {
-                    const idx = this.activeOrders.findIndex(o => o.id === data.orderId);
-                    if (idx !== -1) {
-                        const served = this.activeOrders.splice(idx, 1)[0];
-                        served.status = 'served';
-                        this.historyOrders.unshift(served);
+                    this.activeOrders = this.activeOrders.filter(order => order.id !== data.orderId);
+                    if (data.order) {
+                        this.historyOrders.unshift(data.order);
                     }
-                } else {
-                    const idx = this.activeOrders.findIndex(o => o.id === data.orderId);
-                    if (idx !== -1) {
-                        this.activeOrders[idx].status = data.status;
-                    }
+                    return;
+                }
+
+                const index = this.activeOrders.findIndex(order => order.id === data.orderId);
+                if (index !== -1) {
+                    this.activeOrders[index] = data.order || { ...this.activeOrders[index], status: data.status };
                 }
             });
         },
 
         async loadActiveOrders() {
             try {
-                const res = await fetch('/api/orders?status=active');
-                const data = await res.json();
+                const response = await fetch('/api/orders?status=active', {
+                    credentials: 'same-origin'
+                });
+
+                if (response.status === 401) {
+                    this.handleUnauthorized();
+                    return;
+                }
+
+                const data = await response.json();
                 if (Array.isArray(data)) {
                     this.activeOrders = data;
                 }
-            } catch (e) {
-                console.error('Failed to load orders:', e);
+            } catch (error) {
+                console.error('Failed to load active orders:', error);
             }
         },
 
         async loadHistory() {
             try {
-                const res = await fetch('/api/orders?status=served');
-                const data = await res.json();
+                const response = await fetch('/api/orders?status=served', {
+                    credentials: 'same-origin'
+                });
+
+                if (response.status === 401) {
+                    this.handleUnauthorized();
+                    return;
+                }
+
+                const data = await response.json();
                 if (Array.isArray(data)) {
                     this.historyOrders = data;
                 }
-            } catch (e) {
-                console.error('Failed to load history:', e);
+            } catch (error) {
+                console.error('Failed to load history:', error);
             }
         },
 
         async updateStatus(orderId, status) {
             try {
-                await fetch(`/api/orders/${orderId}/status`, {
+                const response = await fetch(`/api/orders/${orderId}/status`, {
                     method: 'PATCH',
+                    credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ status })
                 });
-                // Optimistic update
-                if (status === 'served') {
-                    const idx = this.activeOrders.findIndex(o => o.id === orderId);
-                    if (idx !== -1) {
-                        const served = this.activeOrders.splice(idx, 1)[0];
-                        served.status = 'served';
-                        this.historyOrders.unshift(served);
-                    }
-                } else {
-                    const idx = this.activeOrders.findIndex(o => o.id === orderId);
-                    if (idx !== -1) this.activeOrders[idx].status = status;
+
+                if (response.status === 401) {
+                    this.handleUnauthorized();
+                    return;
                 }
-            } catch (e) {
-                console.error('Failed to update status:', e);
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to update order');
+                }
+
+                if (status === 'served') {
+                    this.activeOrders = this.activeOrders.filter(order => order.id !== orderId);
+                    if (data.order) {
+                        this.historyOrders.unshift(data.order);
+                    }
+                    return;
+                }
+
+                const index = this.activeOrders.findIndex(order => order.id === orderId);
+                if (index !== -1 && data.order) {
+                    this.activeOrders[index] = data.order;
+                }
+            } catch (error) {
+                console.error('Failed to update status:', error);
             }
         },
 
@@ -143,29 +239,42 @@ document.addEventListener('alpine:init', () => {
                 sound.currentTime = 0;
                 sound.play().catch(() => {});
             }
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+
+            if (navigator.vibrate) {
+                navigator.vibrate([200, 100, 200]);
+            }
+        },
+
+        formatMoney(value) {
+            return new Intl.NumberFormat('en-IE', {
+                style: 'currency',
+                currency: 'EUR'
+            }).format(Number(value) || 0);
         },
 
         parseDateLocal(dateStr) {
             if (!dateStr) return null;
-            // Parse "YYYY-MM-DD HH:MM:SS" as local time (not UTC)
             const [datePart, timePart] = dateStr.split(' ');
-            const [y, m, d] = datePart.split('-').map(Number);
-            const [hh, mm, ss] = (timePart || '00:00:00').split(':').map(Number);
-            return new Date(y, m - 1, d, hh, mm, ss);
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hour, minute, second] = (timePart || '00:00:00').split(':').map(Number);
+            return new Date(year, month - 1, day, hour, minute, second);
         },
 
         timeAgo(dateStr) {
             if (!dateStr) return '';
+
             const now = new Date();
             const date = this.parseDateLocal(dateStr);
             const diffMs = now - date;
             const diffMins = Math.floor(diffMs / 60000);
+
             if (diffMins < 1) return 'Just now';
-            if (diffMins < 60) return diffMins + 'm ago';
+            if (diffMins < 60) return `${diffMins}m ago`;
+
             const diffHours = Math.floor(diffMins / 60);
-            if (diffHours < 24) return diffHours + 'h ago';
-            return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+            if (diffHours < 24) return `${diffHours}h ago`;
+
+            return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
         },
 
         minsAgo(dateStr) {
@@ -175,20 +284,28 @@ document.addEventListener('alpine:init', () => {
             return Math.floor((now - date) / 60000);
         },
 
-        get todayStats() {
-            const today = new Date();
-            const todayStr = today.toDateString();
-            const todayOrders = this.historyOrders.filter(o => {
-                const d = this.parseDateLocal(o.date);
-                return d && d.toDateString() === todayStr;
+        get combinedTodayOrders() {
+            const today = new Date().toDateString();
+            const seen = new Map();
+
+            [...this.activeOrders, ...this.historyOrders].forEach(order => {
+                const date = this.parseDateLocal(order.date);
+                if (date && date.toDateString() === today) {
+                    seen.set(order.id, order);
+                }
             });
-            const orders = todayOrders.length;
-            const revenue = todayOrders.reduce((sum, o) => sum + parseFloat(o.total || 0), 0).toFixed(2);
+
+            return Array.from(seen.values());
+        },
+
+        get todayStats() {
+            const orders = this.combinedTodayOrders.length;
+            const revenue = this.combinedTodayOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
             return { orders, revenue };
         },
 
-        get avgPrepTime() {
-            return '~8m';
+        get readyCount() {
+            return this.activeOrders.filter(order => order.status === 'ready').length;
         }
     }));
 });
