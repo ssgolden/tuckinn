@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, Plus, Pencil } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { FileText, Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -37,6 +37,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/lib/auth-context";
+import { apiFetch, withAdminSession } from "@/lib/api";
 
 type ContentBlock = {
   id: string;
@@ -49,16 +51,31 @@ type ContentBlock = {
   createdAt: string;
 };
 
-const sampleBlocks: ContentBlock[] = [
-  { id: "1", key: "announcement-bar", title: "Announcement Bar", status: "published", payload: { message: "Free delivery on orders over €25!", color: "red" }, startsAt: null, endsAt: null, createdAt: "2026-04-10" },
-  { id: "2", key: "hero-highlight", title: "Hero Highlight", status: "published", payload: { headline: "New Spring Menu", subtext: "Fresh seasonal dishes available now", ctaText: "View Menu", ctaUrl: "/menu" }, startsAt: null, endsAt: null, createdAt: "2026-04-09" },
-  { id: "3", key: "promo-banner", title: "Promo Banner", status: "draft", payload: { message: "Happy Hour 5–7pm — 20% off all drinks!", background: "#1a1a1a" }, startsAt: "2026-04-15T17:00:00Z", endsAt: "2026-04-15T19:00:00Z", createdAt: "2026-04-12" },
-];
-
 export default function ContentPage() {
+  const { session } = useAuth();
+  const [blocks, setBlocks] = useState<ContentBlock[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ContentBlock | null>(null);
   const [form, setForm] = useState({ key: "", title: "", status: "draft" as ContentBlock["status"], message: "" });
+  const [saving, setSaving] = useState(false);
+
+  const fetchBlocks = useCallback(async () => {
+    if (!session) return;
+    try {
+      setLoading(true);
+      const data = await apiFetch<ContentBlock[]>("/content/blocks?locationCode=main", {}, session.accessToken);
+      setBlocks(data);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || "Failed to load content blocks");
+    } finally {
+      setLoading(false);
+    }
+  }, [session]);
+
+  useEffect(() => { fetchBlocks(); }, [fetchBlocks]);
 
   function openCreate() {
     setEditing(null);
@@ -68,9 +85,73 @@ export default function ContentPage() {
 
   function openEdit(block: ContentBlock) {
     setEditing(block);
-    setForm({ key: block.key, title: block.title, status: block.status, message: (block.payload as { message?: string }).message || "" });
+    const p = block.payload as Record<string, string>;
+    setForm({ key: block.key, title: block.title, status: block.status, message: p.message || p.body || p.cta || "" });
     setDialogOpen(true);
   }
+
+  async function handleSave() {
+    if (!session) return;
+    setSaving(true);
+    try {
+      const payload = editing
+        ? { ...editing.payload, message: form.message }
+        : { type: "banner", message: form.message };
+
+      if (editing) {
+        await withAdminSession(session, (token) =>
+          apiFetch(`/content/blocks/${editing.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ key: form.key, title: form.title, status: form.status, payload }),
+          }, token), () => {}
+        );
+      } else {
+        await withAdminSession(session, (token) =>
+          apiFetch("/content/blocks?locationCode=main", {
+            method: "POST",
+            body: JSON.stringify({ key: form.key, title: form.title, status: form.status, payload }),
+          }, token), () => {}
+        );
+      }
+      setDialogOpen(false);
+      fetchBlocks();
+    } catch (err: any) {
+      alert("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(block: ContentBlock) {
+    if (!session || !confirm(`Delete "${block.title}"?`)) return;
+    try {
+      await withAdminSession(session, (token) =>
+        apiFetch(`/content/blocks/${block.id}`, { method: "DELETE" }, token), () => {}
+      );
+      fetchBlocks();
+    } catch (err: any) {
+      alert("Delete failed: " + err.message);
+    }
+  }
+
+  async function toggleStatus(block: ContentBlock) {
+    if (!session) return;
+    const next = block.status === "published" ? "draft" : "published";
+    try {
+      await withAdminSession(session, (token) =>
+        apiFetch(`/content/blocks/${block.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: next }),
+        }, token), () => {}
+      );
+      fetchBlocks();
+    } catch (err: any) {
+      alert("Update failed: " + err.message);
+    }
+  }
+
+  if (loading) return <div className="p-8 text-center text-muted-foreground">Loading content blocks…</div>;
+  if (error && blocks.length === 0) return <div className="p-8 text-center text-red-500">Error: {error}</div>;
 
   return (
     <div className="space-y-6">
@@ -81,8 +162,8 @@ export default function ContentPage() {
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger render={<Button onClick={openCreate} />}>
-  <Plus className="h-4 w-4 mr-2" /> New Block
-</DialogTrigger>
+            <Plus className="h-4 w-4 mr-2" /> New Block
+          </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Block" : "Create Block"}</DialogTitle>
@@ -103,6 +184,7 @@ export default function ContentPage() {
                     <SelectContent>
                       <SelectItem value="draft">Draft</SelectItem>
                       <SelectItem value="published">Published</SelectItem>
+                      <SelectItem value="archived">Archived</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -115,25 +197,19 @@ export default function ContentPage() {
                 <Label>Message / Content</Label>
                 <Textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} placeholder="Content text" rows={3} />
               </div>
-              <Button className="w-full" disabled={!form.key || !form.title}>
-                {editing ? "Update Block" : "Create Block"}
+              <Button className="w-full" onClick={handleSave} disabled={saving || !form.key || !form.title}>
+                {saving ? "Saving…" : editing ? "Update Block" : "Create Block"}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      <Card className="border-amber-200 bg-amber-50">
-        <CardContent className="pt-4 text-sm text-amber-800">
-          ⚠️ Content management API is coming soon. Showing current blocks — edits will be wired when the API is ready.
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            All Blocks ({sampleBlocks.length})
+            All Blocks ({blocks.length})
           </CardTitle>
           <CardDescription>CMS content blocks for storefront rendering.</CardDescription>
         </CardHeader>
@@ -150,12 +226,18 @@ export default function ContentPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sampleBlocks.map((block) => (
+              {blocks.length === 0 ? (
+                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No content blocks yet.</TableCell></TableRow>
+              ) : blocks.map((block) => (
                 <TableRow key={block.id}>
                   <TableCell className="font-mono text-xs">{block.key}</TableCell>
                   <TableCell className="font-medium">{block.title}</TableCell>
                   <TableCell>
-                    <Badge variant={block.status === "published" ? "default" : "secondary"}>
+                    <Badge
+                      variant={block.status === "published" ? "default" : "secondary"}
+                      className="cursor-pointer"
+                      onClick={() => toggleStatus(block)}
+                    >
                       {block.status}
                     </Badge>
                   </TableCell>
@@ -163,9 +245,12 @@ export default function ContentPage() {
                     {block.startsAt ? `${new Date(block.startsAt).toLocaleDateString()} → ${block.endsAt ? new Date(block.endsAt).toLocaleDateString() : "∞"}` : "Always"}
                   </TableCell>
                   <TableCell className="text-sm">{new Date(block.createdAt).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right space-x-1">
                     <Button variant="ghost" size="sm" onClick={() => openEdit(block)}>
                       <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(block)}>
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </TableCell>
                 </TableRow>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Armchair, Plus, Pencil, QrCode } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Armchair, Plus, Pencil, QrCode, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -30,6 +30,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useAuth } from "@/lib/auth-context";
+import { apiFetch, withAdminSession, type AdminSession } from "@/lib/api";
 
 type DiningTable = {
   id: string;
@@ -40,42 +42,100 @@ type DiningTable = {
   isActive: boolean;
 };
 
-const sampleTables: DiningTable[] = [
-  { id: "1", tableNumber: 1, name: "Window Seat", qrSlug: "table-1-main", seats: 2, isActive: true },
-  { id: "2", tableNumber: 2, name: "Booth", qrSlug: "table-2-main", seats: 4, isActive: true },
-  { id: "3", tableNumber: 3, name: "Patio", qrSlug: "table-3-main", seats: 4, isActive: true },
-  { id: "4", tableNumber: 4, name: "Bar Stool", qrSlug: "table-4-main", seats: 1, isActive: true },
-  { id: "5", tableNumber: 5, name: "Corner Nook", qrSlug: "table-5-main", seats: 2, isActive: true },
-  { id: "6", tableNumber: 6, name: "Garden", qrSlug: "table-6-main", seats: 6, isActive: true },
-  { id: "7", tableNumber: 7, name: "Fireplace", qrSlug: "table-7-main", seats: 4, isActive: true },
-  { id: "8", tableNumber: 8, name: "Cozy Spot", qrSlug: "table-8-main", seats: 2, isActive: true },
-  { id: "9", tableNumber: 9, name: "Family", qrSlug: "table-9-main", seats: 8, isActive: true },
-  { id: "10", tableNumber: 10, name: "VIP", qrSlug: "table-10-main", seats: 6, isActive: true },
-  { id: "11", tableNumber: 11, name: null, qrSlug: "table-11-main", seats: 2, isActive: false },
-  { id: "12", tableNumber: 12, name: null, qrSlug: "table-12-main", seats: 2, isActive: false },
-  { id: "13", tableNumber: 13, name: null, qrSlug: "table-13-main", seats: 4, isActive: false },
-  { id: "14", tableNumber: 14, name: null, qrSlug: "table-14-main", seats: 4, isActive: false },
-  { id: "15", tableNumber: 15, name: null, qrSlug: "table-15-main", seats: 4, isActive: false },
-];
-
 export default function TablesPage() {
+  const { session } = useAuth();
+  const [tables, setTables] = useState<DiningTable[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<DiningTable | null>(null);
-  const [form, setForm] = useState({ name: "", seats: 2, isActive: true });
+  const [form, setForm] = useState({ name: "", seats: 2, isActive: true, tableNumber: 0 });
+  const [saving, setSaving] = useState(false);
+
+  const fetchTables = useCallback(async () => {
+    if (!session) return;
+    try {
+      setLoading(true);
+      const data = await apiFetch<DiningTable[]>("/tables?locationCode=main", {}, session.accessToken);
+      setTables(data);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || "Failed to load tables");
+    } finally {
+      setLoading(false);
+    }
+  }, [session]);
+
+  useEffect(() => { fetchTables(); }, [fetchTables]);
 
   function openCreate() {
     setEditing(null);
-    setForm({ name: "", seats: 2, isActive: true });
+    const nextNum = tables.length > 0 ? Math.max(...tables.map(t => t.tableNumber)) + 1 : 1;
+    setForm({ name: "", seats: 2, isActive: true, tableNumber: nextNum });
     setDialogOpen(true);
   }
 
   function openEdit(table: DiningTable) {
     setEditing(table);
-    setForm({ name: table.name || "", seats: table.seats || 2, isActive: table.isActive });
+    setForm({ name: table.name || "", seats: table.seats || 2, isActive: table.isActive, tableNumber: table.tableNumber });
     setDialogOpen(true);
   }
 
+  async function handleSave() {
+    if (!session) return;
+    setSaving(true);
+    try {
+      if (editing) {
+        await withAdminSession(
+          session,
+          (token) => apiFetch(`/tables/${editing.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ name: form.name || null, seats: form.seats, isActive: form.isActive }),
+          }, token),
+          (s) => {}
+        );
+      } else {
+        await withAdminSession(
+          session,
+          (token) => apiFetch("/tables?locationCode=main", {
+            method: "POST",
+            body: JSON.stringify({
+              tableNumber: form.tableNumber,
+              name: form.name || null,
+              qrSlug: `table-${form.tableNumber}-main`,
+              seats: form.seats,
+              isActive: form.isActive,
+            }),
+          }, token),
+          (s) => {}
+        );
+      }
+      setDialogOpen(false);
+      fetchTables();
+    } catch (err: any) {
+      alert("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(table: DiningTable) {
+    if (!session || !confirm(`Delete Table #${table.tableNumber}?`)) return;
+    try {
+      await withAdminSession(session, (token) => apiFetch(`/tables/${table.id}`, { method: "DELETE" }, token), () => {});
+      fetchTables();
+    } catch (err: any) {
+      alert("Delete failed: " + err.message);
+    }
+  }
+
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  if (loading) return <div className="p-8 text-center text-muted-foreground">Loading tables…</div>;
+
+  if (error && tables.length === 0) {
+    return <div className="p-8 text-center text-red-500">Error: {error}</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -86,8 +146,8 @@ export default function TablesPage() {
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger render={<Button onClick={openCreate} />}>
-  <Plus className="h-4 w-4 mr-2" /> Add Table
-</DialogTrigger>
+            <Plus className="h-4 w-4 mr-2" /> Add Table
+          </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Table" : "Add Table"}</DialogTitle>
@@ -96,6 +156,10 @@ export default function TablesPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label>Table Number</Label>
+                <Input type="number" value={form.tableNumber} onChange={(e) => setForm({ ...form, tableNumber: parseInt(e.target.value) || 1 })} disabled={!!editing} />
+              </div>
               <div className="space-y-2">
                 <Label>Name</Label>
                 <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Window Seat" />
@@ -108,27 +172,21 @@ export default function TablesPage() {
                 <Label>Active</Label>
                 <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
               </div>
-              <Button className="w-full" disabled={!editing && !form.name}>
-                {editing ? "Update Table" : "Create Table"}
+              <Button className="w-full" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving…" : editing ? "Update Table" : "Create Table"}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      <Card className="border-amber-200 bg-amber-50">
-        <CardContent className="pt-4 text-sm text-amber-800">
-          ⚠️ Table management API is coming soon. Showing current tables from database — edits will be wired when the API is ready.
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Armchair className="h-5 w-5" />
-            All Tables ({sampleTables.length})
+            All Tables ({tables.length})
           </CardTitle>
-          <CardDescription>{sampleTables.filter((t) => t.isActive).length} active · {sampleTables.filter((t) => !t.isActive).length} inactive</CardDescription>
+          <CardDescription>{tables.filter((t) => t.isActive).length} active · {tables.filter((t) => !t.isActive).length} inactive</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -143,7 +201,7 @@ export default function TablesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sampleTables.map((table) => (
+              {tables.map((table) => (
                 <TableRow key={table.id}>
                   <TableCell className="font-mono font-medium">{table.tableNumber}</TableCell>
                   <TableCell>{table.name || <span className="text-muted-foreground italic">Unnamed</span>}</TableCell>
@@ -159,9 +217,12 @@ export default function TablesPage() {
                       {table.isActive ? "Active" : "Inactive"}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right space-x-1">
                     <Button variant="ghost" size="sm" onClick={() => openEdit(table)}>
                       <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(table)}>
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </TableCell>
                 </TableRow>
