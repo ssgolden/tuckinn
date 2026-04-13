@@ -1,5 +1,7 @@
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3200/api";
+  process.env.NODE_ENV === 'development'
+    ? '/api/proxy'  // proxy to VPS API (avoids CORS)
+    : process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3200/api';
 
 export class ApiError extends Error {
   constructor(

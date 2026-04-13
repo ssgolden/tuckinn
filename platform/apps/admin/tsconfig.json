@@ -8,7 +8,10 @@
         "name": "next"
       }
     ],
-    "allowJs": true
+    "allowJs": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": [
     "**/*.ts",

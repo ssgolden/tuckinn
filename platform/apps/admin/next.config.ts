@@ -4,7 +4,19 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
-  outputFileTracingRoot: path.join(__dirname, "../..")
+  outputFileTracingRoot: path.join(__dirname, "../.."),
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "187.124.217.8.sslip.io",
+      },
+      {
+        protocol: "https",
+        hostname: "**.sslip.io",
+      },
+    ],
+  },
 };
 
 export default nextConfig;
