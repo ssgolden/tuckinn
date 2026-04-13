@@ -1,7 +1,7 @@
 FROM node:20-bookworm-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates gosu && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
 FROM base AS build
@@ -50,7 +50,7 @@ RUN chmod +x ./infra/docker/api-entrypoint.sh && \
     mkdir -p /app/data/uploads && \
     chown -R appuser:appgroup /app
 
-USER appuser
-
+# Entry point runs as root so it can fix volume permissions,
+# then drops to appuser for the actual Node process.
 EXPOSE 3200
-CMD ["./infra/docker/api-entrypoint.sh"]
+ENTRYPOINT ["./infra/docker/api-entrypoint.sh"]
