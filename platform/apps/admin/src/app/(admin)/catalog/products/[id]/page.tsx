@@ -102,7 +102,7 @@ export default function ProductDetailPage() {
         toast.success("Product created");
         router.push(`/catalog/products/${created.id}`);
       } else {
-        const updateData: Record<string, unknown> = { ...form };
+        const updateData: Record<string, unknown> = { ...form, variants: variants.map(v => ({ ...v, priceAmount: Number(v.priceAmount) })) };
         if (form.imageUrl === "" && product?.imageUrl) updateData.clearImage = true;
         await apiFetch(`/catalog/products/${productId}`, {
           method: "PATCH", body: JSON.stringify(updateData),
@@ -145,6 +145,15 @@ export default function ProductDetailPage() {
       setForm(prev => ({ ...prev, status: "active" }));
       toast.success("Product restored");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Restore failed"); }
+  }
+
+  async function handleDelete() {
+    if (!confirm("Permanently delete this product? This cannot be undone.")) return;
+    try {
+      await apiFetch(`/catalog/products/${productId}`, { method: "DELETE" }, session?.accessToken);
+      toast.success("Product deleted");
+      router.push("/catalog/products");
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Delete failed"); }
   }
 
   async function handleAttachGroup(groupId: string) {
@@ -208,6 +217,9 @@ export default function ProductDetailPage() {
           {!isCreate && form.status === "archived" && (
             <Button variant="outline" size="sm" onClick={handleRestore}><RotateCcw className="h-4 w-4 mr-1" /> Restore</Button>
           )}
+          {!isCreate && form.status === "archived" && (
+            <Button variant="destructive" size="sm" onClick={handleDelete}><Trash2 className="h-4 w-4 mr-1" /> Delete</Button>
+          )}
           <Button onClick={handleSave} disabled={saving || !form.name}>
             {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
             {isCreate ? "Create Product" : "Save Changes"}
@@ -257,7 +269,7 @@ export default function ProductDetailPage() {
                       onChange={(e) => setForm({ ...form, categorySlug: e.target.value })}
                     >
                       <option value="">Select category</option>
-                      {categories.map((c) => <option key={c.id} value={c.slug}>{c.name}</option>)}
+                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
                   <div className="space-y-2">
@@ -405,7 +417,7 @@ export default function ProductDetailPage() {
             <CardContent className="text-sm space-y-2">
               <div className="flex justify-between"><span className="text-muted-foreground">Variants</span><span className="font-medium">{variants.length}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Modifier Groups</span><span className="font-medium">{assignedGroupIds.length}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Category</span><span className="font-medium">{categories.find(c => c.slug === form.categorySlug)?.name || "—"}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Category</span><span className="font-medium">{categories.find(c => c.id === form.categorySlug)?.name || "—"}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium capitalize">{form.status}</span></div>
             </CardContent>
           </Card>

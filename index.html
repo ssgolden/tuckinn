@@ -7,10 +7,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
-    <script>window.TUCKINN_API_BASE = 'http://localhost:3200/api';</script>
+    <script>window.TUCKINN_API_BASE = 'http://localhost:3005/api';</script>
     <script src="app.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body x-data="tuckinn()" x-cloak>
     <div id="app">
@@ -542,7 +541,7 @@
                                 </div>
                                 <div class="form-group">
                                     <label class="checkout-label">Name</label>
-                                    <input type="text" x-model="checkoutForm.address" class="form-control" placeholder="Your Name" required>
+                                    <input type="text" x-model="checkoutForm.name" class="form-control" placeholder="Your Name" required>
                                 </div>
                                 <div class="form-group" x-show="orderType === 'collect'">
                                     <label class="checkout-label">Phone number</label>

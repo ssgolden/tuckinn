@@ -31,7 +31,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Pencil, SlidersHorizontal } from "lucide-react";
+import { Plus, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 type ModifierOption = {
@@ -62,6 +62,7 @@ export default function ModifiersPage() {
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ModifierGroup | null>(null);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -70,6 +71,9 @@ export default function ModifiersPage() {
     sortOrder: 0,
     isRequired: false,
   });
+  const [newOption, setNewOption] = useState<{ groupId: string; name: string; price: string }>({ groupId: "", name: "", price: "0" });
+  const [editOption, setEditOption] = useState<{ groupId: string; optionId: string; name: string; price: string; isDefault: boolean; isActive: boolean } | null>(null);
+  const [savingOption, setSavingOption] = useState(false);
 
   async function loadGroups() {
     setLoading(true);
@@ -239,6 +243,57 @@ export default function ModifiersPage() {
 
   const displayGroups = groups.length > 0 ? groups : (error ? sampleGroups : []);
 
+  async function handleAddOption() {
+    if (!session || !newOption.groupId || !newOption.name) return;
+    setSavingOption(true);
+    try {
+      await apiFetch("/modifiers/options", {
+        method: "POST",
+        body: JSON.stringify({
+          locationCode: "main",
+          modifierGroupId: newOption.groupId,
+          name: newOption.name,
+          priceDeltaAmount: parseFloat(newOption.price) || 0,
+          isDefault: false,
+          isActive: true,
+        }),
+      }, session.accessToken);
+      toast.success("Option added");
+      setNewOption({ groupId: "", name: "", price: "0" });
+      loadGroups();
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Add option failed"); }
+    finally { setSavingOption(false); }
+  }
+
+  async function handleUpdateOption() {
+    if (!session || !editOption) return;
+    setSavingOption(true);
+    try {
+      await apiFetch(`/modifiers/options/${editOption.optionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: editOption.name,
+          priceDeltaAmount: parseFloat(editOption.price) || 0,
+          isDefault: editOption.isDefault,
+          isActive: editOption.isActive,
+        }),
+      }, session.accessToken);
+      toast.success("Option updated");
+      setEditOption(null);
+      loadGroups();
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Update failed"); }
+    finally { setSavingOption(false); }
+  }
+
+  async function handleDeleteOption(optionId: string) {
+    if (!session || !confirm("Delete this option?")) return;
+    try {
+      await apiFetch(`/modifiers/options/${optionId}`, { method: "DELETE" }, session.accessToken);
+      toast.success("Option deleted");
+      loadGroups();
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Delete failed"); }
+  }
+
   function formatPrice(amount: number) {
     if (amount === 0) return "—";
     return amount > 0 ? `+€${Number(amount).toFixed(2)}` : `-€${(Math.abs(amount)).toFixed(2)}`;
@@ -314,12 +369,17 @@ export default function ModifiersPage() {
                 {group.name}
                 {group.isRequired && <Badge variant="secondary" className="text-xs">Required</Badge>}
               </CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => openEdit(group)}>
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => setExpandedGroup(expandedGroup === group.id ? null : group.id)}>
+                  {expandedGroup === group.id ? "Collapse" : "Edit Options"}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => openEdit(group)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
             <CardDescription>
-              {group.description || "No description"} · Select {group.minSelect}–{group.maxSelect}
+              {group.description || "No description"} · Select {group.minSelect}–{group.maxSelect} · {group.options.length} options
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -330,19 +390,64 @@ export default function ModifiersPage() {
                   <TableHead>Price Delta</TableHead>
                   <TableHead>Default</TableHead>
                   <TableHead>Active</TableHead>
+                  {expandedGroup === group.id && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {group.options.map((opt) => (
-                  <TableRow key={opt.id}>
-                    <TableCell className="font-medium">{opt.name}</TableCell>
-                    <TableCell className="text-sm">{formatPrice(opt.priceDeltaAmount)}</TableCell>
-                    <TableCell>{opt.isDefault ? "✓" : ""}</TableCell>
-                    <TableCell><Badge variant={opt.isActive ? "default" : "secondary"}>{opt.isActive ? "Active" : "Inactive"}</Badge></TableCell>
-                  </TableRow>
-                ))}
+                {group.options.map((opt) => {
+                  const isEditing = editOption?.optionId === opt.id;
+                  return isEditing ? (
+                    <TableRow key={opt.id}>
+                      <TableCell><Input value={editOption.name} onChange={(e) => setEditOption({ ...editOption, name: e.target.value })} className="h-8 text-sm" /></TableCell>
+                      <TableCell><Input type="number" step="0.01" value={editOption.price} onChange={(e) => setEditOption({ ...editOption, price: e.target.value })} className="h-8 text-sm w-20" /></TableCell>
+                      <TableCell><Switch checked={editOption.isDefault} onCheckedChange={(v) => setEditOption({ ...editOption, isDefault: v })} /></TableCell>
+                      <TableCell><Switch checked={editOption.isActive} onCheckedChange={(v) => setEditOption({ ...editOption, isActive: v })} /></TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" onClick={handleUpdateOption} disabled={savingOption}>Save</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditOption(null)}>Cancel</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow key={opt.id}>
+                      <TableCell className="font-medium">{opt.name}</TableCell>
+                      <TableCell className="text-sm">{formatPrice(opt.priceDeltaAmount)}</TableCell>
+                      <TableCell>{opt.isDefault ? "✓" : ""}</TableCell>
+                      <TableCell><Badge variant={opt.isActive ? "default" : "secondary"}>{opt.isActive ? "Active" : "Inactive"}</Badge></TableCell>
+                      {expandedGroup === group.id && (
+                        <TableCell className="text-right">
+                          <div className="flex gap-1 justify-end">
+                            <Button variant="ghost" size="sm" onClick={() => setEditOption({ groupId: group.id, optionId: opt.id, name: opt.name, price: String(opt.priceDeltaAmount), isDefault: opt.isDefault, isActive: opt.isActive })}>
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteOption(opt.id)}>
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
+            {expandedGroup === group.id && (
+              <div className="mt-4 pt-4 border-t space-y-3">
+                <p className="text-sm font-medium text-muted-foreground">Add new option</p>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">Name</Label>
+                    <Input value={newOption.groupId === group.id ? newOption.name : ""} onChange={(e) => setNewOption({ groupId: group.id, name: e.target.value, price: newOption.groupId === group.id ? newOption.price : "0" })} placeholder="e.g. Extra Cheese" className="h-8 text-sm" />
+                  </div>
+                  <div className="w-24 space-y-1">
+                    <Label className="text-xs">Price (€)</Label>
+                    <Input type="number" step="0.01" value={newOption.groupId === group.id ? newOption.price : "0"} onChange={(e) => setNewOption({ ...newOption, groupId: group.id, price: e.target.value })} className="h-8 text-sm" />
+                  </div>
+                  <Button size="sm" onClick={handleAddOption} disabled={savingOption || !newOption.name || newOption.groupId !== group.id}>Add</Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       ))}

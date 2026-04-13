@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.187.124.217.8.sslip.io/api";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3200/api";
 
 async function proxyRequest(request: NextRequest, method: string) {
   const url = new URL(request.url);

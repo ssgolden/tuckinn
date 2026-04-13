@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 type ChannelConfig = {
@@ -23,6 +23,8 @@ type ChannelConfig = {
   enabled: boolean;
   fields: { key: string; label: string; value: string; secret?: boolean }[];
 };
+
+const STORAGE_KEY = "tuckinn.admin.notifications";
 
 const defaultChannels: ChannelConfig[] = [
   {
@@ -72,26 +74,68 @@ const defaultChannels: ChannelConfig[] = [
   },
 ];
 
+function loadChannels(): ChannelConfig[] {
+  if (typeof window === "undefined") return defaultChannels;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return defaultChannels;
+    const parsed = JSON.parse(stored) as ChannelConfig[];
+    // Merge stored values with defaults (preserve new fields from defaults)
+    return defaultChannels.map((def) => {
+      const stored = parsed.find((c) => c.type === def.type);
+      if (!stored) return def;
+      return {
+        ...def,
+        enabled: stored.enabled,
+        fields: def.fields.map((f) => {
+          const sf = stored.fields?.find((sf) => sf.key === f.key);
+          return sf ? { ...f, value: sf.value } : f;
+        }),
+      };
+    });
+  } catch {
+    return defaultChannels;
+  }
+}
+
+function saveChannels(channels: ChannelConfig[]) {
+  if (typeof window === "undefined") return;
+  const serializable = channels.map((ch) => ({
+    type: ch.type,
+    enabled: ch.enabled,
+    fields: ch.fields.map((f) => ({ key: f.key, value: f.value })),
+  }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+}
+
 export default function NotificationsPage() {
-  const [channels, setChannels] = useState(defaultChannels);
+  const [channels, setChannels] = useState<ChannelConfig[]>(defaultChannels);
+
+  useEffect(() => {
+    setChannels(loadChannels());
+  }, []);
 
   function toggleChannel(type: string) {
-    setChannels((prev) =>
-      prev.map((ch) =>
+    setChannels((prev) => {
+      const next = prev.map((ch) =>
         ch.type === type ? { ...ch, enabled: !ch.enabled } : ch
-      )
-    );
-    toast.info("Notification channel settings are saved in environment configuration.");
+      );
+      saveChannels(next);
+      return next;
+    });
+    toast.success("Channel setting saved");
   }
 
   function updateField(type: string, fieldKey: string, value: string) {
-    setChannels((prev) =>
-      prev.map((ch) =>
+    setChannels((prev) => {
+      const next = prev.map((ch) =>
         ch.type === type
           ? { ...ch, fields: ch.fields.map((f) => f.key === fieldKey ? { ...f, value } : f) }
           : ch
-      )
-    );
+      );
+      saveChannels(next);
+      return next;
+    });
   }
 
   return (
