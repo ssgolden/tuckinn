@@ -1,6 +1,8 @@
 "use client";
 
-import { Bell, Mail, MessageSquare, Smartphone, Webhook } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
+import { apiFetch, withAdminSession } from "@/lib/api";
+import { Bell, Mail, MessageSquare, Smartphone, Webhook, Loader2, AlertTriangle } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -12,7 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 
 type ChannelConfig = {
@@ -24,118 +27,185 @@ type ChannelConfig = {
   fields: { key: string; label: string; value: string; secret?: boolean }[];
 };
 
-const STORAGE_KEY = "tuckinn.admin.notifications";
+type NotificationConfig = {
+  channels: ChannelConfig[];
+};
 
-const defaultChannels: ChannelConfig[] = [
+const channelDefaults: Omit<ChannelConfig, "enabled" | "fields">[] = [
   {
     type: "email",
     label: "Email",
     description: "Order confirmations, status updates via SendGrid/SMTP",
-    enabled: true,
     icon: Mail,
-    fields: [
-      { key: "provider", label: "Provider", value: "SendGrid" },
-      { key: "from", label: "From Address", value: "orders@tuckinn.com" },
-    ],
   },
   {
     type: "sms",
     label: "SMS",
     description: "Order ready notifications via Twilio",
-    enabled: false,
     icon: MessageSquare,
-    fields: [
-      { key: "provider", label: "Provider", value: "Twilio" },
-      { key: "from", label: "From Number", value: "" },
-      { key: "sid", label: "Account SID", value: "", secret: true },
-    ],
   },
   {
     type: "push",
     label: "Push",
     description: "Browser push notifications for kitchen staff",
-    enabled: false,
     icon: Smartphone,
-    fields: [
-      { key: "provider", label: "Provider", value: "Web Push API" },
-      { key: "vapidKey", label: "VAPID Public Key", value: "" },
-    ],
   },
   {
     type: "webhook",
     label: "Webhook",
     description: "POST events to external systems (POS, delivery, analytics)",
-    enabled: true,
     icon: Webhook,
-    fields: [
-      { key: "url", label: "Endpoint URL", value: "" },
-      { key: "secret", label: "Signing Secret", value: "", secret: true },
-    ],
   },
 ];
 
-function loadChannels(): ChannelConfig[] {
-  if (typeof window === "undefined") return defaultChannels;
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return defaultChannels;
-    const parsed = JSON.parse(stored) as ChannelConfig[];
-    // Merge stored values with defaults (preserve new fields from defaults)
-    return defaultChannels.map((def) => {
-      const stored = parsed.find((c) => c.type === def.type);
-      if (!stored) return def;
+const defaultFields: Record<string, { key: string; label: string; secret?: boolean }[]> = {
+  email: [
+    { key: "provider", label: "Provider" },
+    { key: "from", label: "From Address" },
+  ],
+  sms: [
+    { key: "provider", label: "Provider" },
+    { key: "from", label: "From Number" },
+    { key: "sid", label: "Account SID", secret: true },
+  ],
+  push: [
+    { key: "provider", label: "Provider" },
+    { key: "vapidKey", label: "VAPID Public Key" },
+  ],
+  webhook: [
+    { key: "url", label: "Endpoint URL" },
+    { key: "secret", label: "Signing Secret", secret: true },
+  ],
+};
+
+function buildChannelsFromApi(apiChannels: Array<{ type: string; enabled: boolean; fields: Array<{ key: string; value: string }> }>): ChannelConfig[] {
+  return channelDefaults.map((def) => {
+    const apiChannel = apiChannels.find((c) => c.type === def.type);
+    const fields = (defaultFields[def.type] || []).map((fieldDef) => {
+      const apiField = apiChannel?.fields?.find((f) => f.key === fieldDef.key);
       return {
-        ...def,
-        enabled: stored.enabled,
-        fields: def.fields.map((f) => {
-          const sf = stored.fields?.find((sf) => sf.key === f.key);
-          return sf ? { ...f, value: sf.value } : f;
-        }),
+        ...fieldDef,
+        value: apiField?.value ?? "",
       };
     });
-  } catch {
-    return defaultChannels;
-  }
+    return {
+      ...def,
+      enabled: apiChannel?.enabled ?? false,
+      fields,
+    };
+  });
 }
 
-function saveChannels(channels: ChannelConfig[]) {
-  if (typeof window === "undefined") return;
-  const serializable = channels.map((ch) => ({
-    type: ch.type,
-    enabled: ch.enabled,
-    fields: ch.fields.map((f) => ({ key: f.key, value: f.value })),
-  }));
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable));
+function channelsToApi(channels: ChannelConfig[]) {
+  return {
+    channels: channels.map((ch) => ({
+      type: ch.type,
+      enabled: ch.enabled,
+      fields: ch.fields.map((f) => ({ key: f.key, value: f.value })),
+    })),
+  };
 }
 
 export default function NotificationsPage() {
-  const [channels, setChannels] = useState<ChannelConfig[]>(defaultChannels);
+  const { session, updateSession } = useAuth();
+  const [channels, setChannels] = useState<ChannelConfig[]>(() =>
+    channelDefaults.map((def) => ({
+      ...def,
+      enabled: false,
+      fields: (defaultFields[def.type] || []).map((f) => ({ ...f, value: "" })),
+    }))
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    setChannels(loadChannels());
-  }, []);
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiFetch<NotificationConfig>("/notifications/config", undefined, session?.accessToken);
+      if (data?.channels) {
+        setChannels(buildChannelsFromApi(data.channels));
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load notification config";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [session]);
+
+  useEffect(() => { loadConfig(); }, [loadConfig]);
+
+  async function handleSave() {
+    if (!session) return;
+    setSaving(true);
+    try {
+      await withAdminSession(session, (token) =>
+        apiFetch("/notifications/config", {
+          method: "PATCH",
+          body: JSON.stringify(channelsToApi(channels)),
+        }, token), updateSession
+      );
+      toast.success("Notification settings saved.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to save settings.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function toggleChannel(type: string) {
-    setChannels((prev) => {
-      const next = prev.map((ch) =>
+    setChannels((prev) =>
+      prev.map((ch) =>
         ch.type === type ? { ...ch, enabled: !ch.enabled } : ch
-      );
-      saveChannels(next);
-      return next;
-    });
-    toast.success("Channel setting saved");
+      )
+    );
   }
 
   function updateField(type: string, fieldKey: string, value: string) {
-    setChannels((prev) => {
-      const next = prev.map((ch) =>
+    setChannels((prev) =>
+      prev.map((ch) =>
         ch.type === type
           ? { ...ch, fields: ch.fields.map((f) => f.key === fieldKey ? { ...f, value } : f) }
           : ch
-      );
-      saveChannels(next);
-      return next;
-    });
+      )
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
+          <p className="text-muted-foreground">Configure notification channels for order events.</p>
+        </div>
+        <Card>
+          <CardContent className="flex items-center justify-center py-12" role="status" aria-live="polite">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
+          <p className="text-muted-foreground">Configure notification channels for order events.</p>
+        </div>
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="pt-4 text-sm text-amber-400">
+            <AlertTriangle className="h-4 w-4 inline mr-1.5 align-text-bottom" />{error}
+            <Button variant="outline" size="sm" className="ml-3 border-amber-500/30 text-amber-400 hover:bg-amber-500/10" onClick={loadConfig}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -144,12 +214,6 @@ export default function NotificationsPage() {
         <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
         <p className="text-muted-foreground">Configure notification channels for order events.</p>
       </div>
-
-      <Card className="border-blue-200 bg-blue-50">
-        <CardContent className="pt-4 text-sm text-blue-800">
-          Notification channel configuration is managed via environment variables. Changes here are saved to your local session for reference.
-        </CardContent>
-      </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
         {channels.map((ch) => (
@@ -160,7 +224,7 @@ export default function NotificationsPage() {
                   <ch.icon className="h-4 w-4" />
                   {ch.label}
                 </CardTitle>
-                <Switch checked={ch.enabled} onCheckedChange={() => toggleChannel(ch.type)} />
+                <Switch checked={ch.enabled} onCheckedChange={() => toggleChannel(ch.type)} aria-label={`Toggle ${ch.label}`} />
               </div>
               <CardDescription>{ch.description}</CardDescription>
             </CardHeader>
@@ -187,6 +251,12 @@ export default function NotificationsPage() {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? "Saving..." : "Save All Changes"}
+        </Button>
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ import {
   Body,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { RoleCode } from "../../src/generated/prisma/index.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../rbac/roles.decorator";
@@ -20,6 +21,12 @@ import { UpdateContentBlockDto } from "./dto/update-content-block.dto";
 @Controller("content")
 export class ContentController {
   constructor(private readonly contentService: ContentService) {}
+
+  @Get("public")
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  async getPublicBlocks(@Query("locationCode") locationCode?: string) {
+    return this.contentService.findPublished(locationCode || "main");
+  }
 
   @Get("blocks")
   @UseGuards(JwtAuthGuard, RolesGuard)

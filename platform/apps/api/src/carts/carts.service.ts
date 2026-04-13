@@ -4,6 +4,7 @@ import {
   NotFoundException
 } from "@nestjs/common";
 import { ProductStatus } from "../../src/generated/prisma/index.js";
+import { fromMinorUnits, toMinorUnits, toDisplayAmount } from "../common/money.utils";
 import { PrismaService } from "../prisma/prisma.service";
 import { AddCartItemDto } from "./dto/add-cart-item.dto";
 import { CreateCartDto } from "./dto/create-cart.dto";
@@ -76,8 +77,8 @@ export class CartsService {
           productVariantId: resolvedItem.variant.id,
           quantity: dto.quantity,
           itemName: resolvedItem.product.name,
-          unitPriceAmount: this.fromMinorUnits(resolvedItem.unitPriceMinor),
-          lineTotalAmount: this.fromMinorUnits(resolvedItem.lineTotalMinor),
+          unitPriceAmount: fromMinorUnits(resolvedItem.unitPriceMinor),
+          lineTotalAmount: fromMinorUnits(resolvedItem.lineTotalMinor),
           notes: dto.notes,
           snapshot: resolvedItem.snapshot
         }
@@ -89,7 +90,7 @@ export class CartsService {
             cartItemId: cartItem.id,
             modifierGroupName: option.groupName,
             modifierOptionName: option.name,
-            priceDeltaAmount: this.fromMinorUnits(option.priceDeltaMinor),
+            priceDeltaAmount: fromMinorUnits(option.priceDeltaMinor),
             snapshot: option.snapshot
           }
         });
@@ -144,8 +145,8 @@ export class CartsService {
         data: {
           quantity: dto.quantity,
           notes: dto.notes,
-          unitPriceAmount: this.fromMinorUnits(resolvedItem.unitPriceMinor),
-          lineTotalAmount: this.fromMinorUnits(resolvedItem.lineTotalMinor),
+          unitPriceAmount: fromMinorUnits(resolvedItem.unitPriceMinor),
+          lineTotalAmount: fromMinorUnits(resolvedItem.lineTotalMinor),
           snapshot: resolvedItem.snapshot
         }
       });
@@ -160,7 +161,7 @@ export class CartsService {
             cartItemId: itemId,
             modifierGroupName: option.groupName,
             modifierOptionName: option.name,
-            priceDeltaAmount: this.fromMinorUnits(option.priceDeltaMinor),
+            priceDeltaAmount: fromMinorUnits(option.priceDeltaMinor),
             snapshot: option.snapshot
           }
         });
@@ -195,6 +196,26 @@ export class CartsService {
     });
 
     return this.getCart(cartId);
+  }
+
+  async deleteCart(cartId: string) {
+    const cart = await this.prisma.cart.findUnique({
+      where: { id: cartId }
+    });
+
+    if (!cart) {
+      throw new NotFoundException("Cart not found.");
+    }
+
+    await this.prisma.cartItem.deleteMany({
+      where: { cartId }
+    });
+
+    await this.prisma.cart.delete({
+      where: { id: cartId }
+    });
+
+    return { success: true };
   }
 
   private ensureCartIsEditable(status: string) {
@@ -316,7 +337,7 @@ export class CartsService {
           id: option.id,
           name: option.name,
           description: option.description,
-          priceDeltaMinor: this.toMinorUnits(option.priceDeltaAmount),
+          priceDeltaMinor: toMinorUnits(option.priceDeltaAmount),
           groupId: group.id,
           groupName: group.name
         });
@@ -336,7 +357,7 @@ export class CartsService {
           optionName: option.name,
           groupId: option.groupId,
           groupName: option.groupName,
-          priceDeltaAmount: this.fromMinorUnits(option.priceDeltaMinor)
+          priceDeltaAmount: fromMinorUnits(option.priceDeltaMinor)
         }
       };
     });
@@ -365,7 +386,7 @@ export class CartsService {
     }
 
     const unitPriceMinor =
-      this.toMinorUnits(variant.priceAmount) +
+      toMinorUnits(variant.priceAmount) +
       selectedOptions.reduce((sum, option) => sum + option.priceDeltaMinor, 0);
     const lineTotalMinor = unitPriceMinor * input.quantity;
 
@@ -397,17 +418,17 @@ export class CartsService {
 
     const subtotalMinor = cart.items.reduce(
       (sum: number, item: { lineTotalAmount: unknown }) =>
-        sum + this.toMinorUnits(item.lineTotalAmount),
+        sum + toMinorUnits(item.lineTotalAmount),
       0
     );
 
     await prisma.cart.update({
       where: { id: cartId },
       data: {
-        subtotalAmount: this.fromMinorUnits(subtotalMinor),
+        subtotalAmount: fromMinorUnits(subtotalMinor),
         discountAmount: "0.00",
         taxAmount: "0.00",
-        totalAmount: this.fromMinorUnits(subtotalMinor)
+        totalAmount: fromMinorUnits(subtotalMinor)
       }
     });
   }
@@ -431,39 +452,28 @@ export class CartsService {
             qrSlug: cart.diningTable.qrSlug
           }
         : null,
-      subtotalAmount: this.toDisplayAmount(cart.subtotalAmount),
-      discountAmount: this.toDisplayAmount(cart.discountAmount),
-      taxAmount: this.toDisplayAmount(cart.taxAmount),
-      totalAmount: this.toDisplayAmount(cart.totalAmount),
+      subtotalAmount: toDisplayAmount(cart.subtotalAmount),
+      discountAmount: toDisplayAmount(cart.discountAmount),
+      taxAmount: toDisplayAmount(cart.taxAmount),
+      totalAmount: toDisplayAmount(cart.totalAmount),
       items: cart.items.map(item => ({
         id: item.id,
         quantity: item.quantity,
         itemName: item.itemName,
         notes: item.notes,
-        unitPriceAmount: this.toDisplayAmount(item.unitPriceAmount),
-        lineTotalAmount: this.toDisplayAmount(item.lineTotalAmount),
+        unitPriceAmount: toDisplayAmount(item.unitPriceAmount),
+        lineTotalAmount: toDisplayAmount(item.lineTotalAmount),
         product: item.product,
         variant: item.productVariant,
         modifiers: item.modifiers.map(modifier => ({
           id: modifier.id,
           modifierGroupName: modifier.modifierGroupName,
           modifierOptionName: modifier.modifierOptionName,
-          priceDeltaAmount: this.toDisplayAmount(modifier.priceDeltaAmount)
+          priceDeltaAmount: toDisplayAmount(modifier.priceDeltaAmount)
         })),
         snapshot: item.snapshot
       }))
     };
   }
 
-  private toMinorUnits(value: unknown): number {
-    return Math.round(Number(value ?? 0) * 100);
-  }
-
-  private fromMinorUnits(value: number): string {
-    return (value / 100).toFixed(2);
-  }
-
-  private toDisplayAmount(value: unknown): number {
-    return Number(Number(value ?? 0).toFixed(2));
-  }
 }

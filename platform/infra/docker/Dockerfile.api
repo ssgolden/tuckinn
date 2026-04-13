@@ -7,20 +7,33 @@ RUN corepack enable
 FROM base AS build
 WORKDIR /app
 
+# Copy dependency files first for better caching
 COPY package.json pnpm-lock.yaml* ./
 COPY pnpm-workspace.yaml turbo.json ./
 COPY apps/api/package.json apps/api/package.json
-COPY prisma prisma
+
+# Add .npmrc to allow prisma build scripts
+RUN echo 'node-linker=hoisted' > .npmrc
+RUN echo 'shamefully-hoist=true' >> .npmrc
+
+# Install all dependencies
 RUN pnpm install --frozen-lockfile=false
 
+# Copy Prisma schema
+COPY prisma prisma
+
+# Copy full source (including pre-generated prisma client)
 COPY . .
-RUN pnpm db:generate
+
+# Build the NestJS API
 RUN pnpm --filter @tuckinn/api build
 
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3200
+
+RUN groupadd --gid 1001 appgroup && useradd --uid 1001 --gid appgroup --shell /bin/sh appuser
 
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/pnpm-lock.yaml* ./
@@ -33,7 +46,11 @@ COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/src/generated ./apps/api/src/generated
 COPY --from=build /app/infra/docker/api-entrypoint.sh ./infra/docker/api-entrypoint.sh
 
-RUN chmod +x ./infra/docker/api-entrypoint.sh
+RUN chmod +x ./infra/docker/api-entrypoint.sh && \
+    mkdir -p /app/data/uploads && \
+    chown -R appuser:appgroup /app
+
+USER appuser
 
 EXPOSE 3200
 CMD ["./infra/docker/api-entrypoint.sh"]

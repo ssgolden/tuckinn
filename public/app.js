@@ -30,6 +30,7 @@ window.tuckinn = function() {
         },
 
         fullMenu: {},
+        menuError: false,
 
         sandwichSteps: [
             { id: 'Choose Bread',     options: ['White Bread', 'Brown Bread', 'White Roll', 'Brown Roll', 'Baguette', 'Wrap', 'Pitta Bread', 'Bagel', 'Bakers Bread Of The Day'] },
@@ -76,11 +77,14 @@ window.tuckinn = function() {
                 const data = await res.json();
 
                 if (data && typeof data === 'object' && !Array.isArray(data)) {
-                    this.fullMenu = data;
-                    // Attach justAdded flag to every item
-                    Object.values(this.fullMenu).forEach(items => {
-                        items.forEach(item => { item.justAdded = false; });
-                    });
+                    // Reassign fullMenu with justAdded flags so Alpine detects the change
+                    this.fullMenu = Object.fromEntries(
+                        Object.entries(data).map(([cat, items]) => [
+                            cat,
+                            items.map(item => ({ ...item, justAdded: false }))
+                        ])
+                    );
+                    this.menuError = false;
                 } else {
                     throw new Error('Unexpected menu format');
                 }
@@ -88,9 +92,15 @@ window.tuckinn = function() {
                 this.applyPendingRoute();
             } catch (e) {
                 console.error('Menu load error', e);
-                this.showToast('Menu could not be loaded.', 'error');
+                this.fullMenu = {};
+                this.menuError = true;
+                this.showToast('Could not load menu. Tap to retry.', 'error');
             }
             this.isLoading = false;
+        },
+
+        retryMenuLoad() {
+            this.loadMenu();
         },
 
         // ── Builder ──────────────────────────────────────────────────────────

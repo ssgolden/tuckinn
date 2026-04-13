@@ -27,15 +27,15 @@ export function StorefrontHero({
             </span>
           ))}
         </div>
-        <div className="hero-action-row">
-          <button type="button" className="primary-action hero-primary-action" onClick={onStartBuilding}>
+        <div className="hero-action-row" role="group" aria-label="Order actions">
+          <button type="button" className="primary-action hero-primary-action" onClick={onStartBuilding} aria-label="Start building your sandwich">
             Start Building
           </button>
-          <button type="button" className="secondary-action hero-secondary-action" onClick={onBrowseFavourites}>
+          <button type="button" className="secondary-action hero-secondary-action" onClick={onBrowseFavourites} aria-label="Browse menu favourites">
             Browse Favourites
           </button>
         </div>
-        <div className="order-steps">
+        <div className="order-steps" role="list" aria-label="How to order">
           {storefrontContent.orderSteps.map(step => (
             <div className="step-card" key={step.number}>
               <span className="step-number">{step.number}</span>

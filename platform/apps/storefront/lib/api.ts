@@ -143,25 +143,30 @@ export async function apiFetch<T>(
 }
 
 export function loadStoredCartId() {
-  return localStorage.getItem("tuckinn.storefront.cartId");
+  try { return localStorage.getItem("tuckinn.storefront.cartId"); }
+  catch { return null; }
 }
 
 export function saveStoredCartId(cartId: string) {
-  localStorage.setItem("tuckinn.storefront.cartId", cartId);
+  try { localStorage.setItem("tuckinn.storefront.cartId", cartId); }
+  catch { /* Safari incognito — storage unavailable */ }
 }
 
 export function clearStoredCartId() {
-  localStorage.removeItem("tuckinn.storefront.cartId");
+  try { localStorage.removeItem("tuckinn.storefront.cartId"); }
+  catch { /* Safari incognito — storage unavailable */ }
 }
 
 export function saveBackOfficeSession(session: BackOfficeSession) {
-  localStorage.setItem("tuckinn.storefront.backoffice", JSON.stringify(session));
-  localStorage.setItem("tuckinn.admin.session", JSON.stringify(session));
-  localStorage.setItem("tuckinn.staff.session", JSON.stringify(session));
+  try { localStorage.setItem("tuckinn.storefront.backoffice", JSON.stringify(session)); }
+  catch { /* Safari incognito — storage unavailable */ }
 }
 
 export function loadBackOfficeSession() {
-  const raw = localStorage.getItem("tuckinn.storefront.backoffice");
+  let raw: string | null;
+  try { raw = localStorage.getItem("tuckinn.storefront.backoffice"); }
+  catch { return null; }
+
   if (!raw) {
     return null;
   }
@@ -174,9 +179,8 @@ export function loadBackOfficeSession() {
 }
 
 export function clearBackOfficeSession() {
-  localStorage.removeItem("tuckinn.storefront.backoffice");
-  localStorage.removeItem("tuckinn.admin.session");
-  localStorage.removeItem("tuckinn.staff.session");
+  try { localStorage.removeItem("tuckinn.storefront.backoffice"); }
+  catch { /* Safari incognito — storage unavailable */ }
 }
 
 export async function loginBackOffice(email: string, password: string) {

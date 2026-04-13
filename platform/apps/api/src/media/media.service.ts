@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import { extname, join } from "path";
@@ -50,6 +50,46 @@ export class MediaService {
       mimeType: asset.mimeType,
       fileSizeBytes: Number(asset.fileSizeBytes ?? 0)
     };
+  }
+
+  async listMedia() {
+    const assets = await this.prisma.mediaAsset.findMany({
+      orderBy: [{ createdAt: "desc" }]
+    });
+
+    return assets.map(asset => ({
+      id: asset.id,
+      url: asset.url,
+      altText: asset.altText,
+      mimeType: asset.mimeType,
+      fileSizeBytes: Number(asset.fileSizeBytes ?? 0),
+      createdAt: asset.createdAt
+    }));
+  }
+
+  async deleteMedia(mediaId: string) {
+    const asset = await this.prisma.mediaAsset.findUnique({
+      where: { id: mediaId }
+    });
+
+    if (!asset) {
+      throw new NotFoundException("Media asset not found.");
+    }
+
+    const filename = asset.storageKey.replace("upload:", "");
+    const filePath = join(this.uploadRoot, filename);
+
+    try {
+      await fs.unlink(filePath);
+    } catch {
+      // File may already be deleted; proceed with DB cleanup
+    }
+
+    await this.prisma.mediaAsset.delete({
+      where: { id: mediaId }
+    });
+
+    return { success: true };
   }
 
   private extensionForMime(mimeType: string) {

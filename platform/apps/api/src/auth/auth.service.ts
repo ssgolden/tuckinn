@@ -1,10 +1,12 @@
 import {
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
 import {
   AuthSessionStatus,
   RoleCode,
@@ -14,13 +16,11 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from "./auth.constants";
 import type { AuthenticatedUser, TokenPair } from "./auth.types";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import { CustomerRegisterDto } from "./dto/customer-register.dto";
 import { LoginDto } from "./dto/login.dto";
 
-const jwt: {
-  sign: (payload: object, secret: string, options?: { expiresIn?: number }) => string;
-  verify: (token: string, secret: string) => unknown;
-} = require("jsonwebtoken");
+import jwt from "jsonwebtoken";
 
 @Injectable()
 export class AuthService {
@@ -199,6 +199,99 @@ export class AuthService {
         revokedAt: new Date()
       }
     });
+
+    return { success: true };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException("User not found");
+
+    const isValid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!isValid) throw new UnauthorizedException("Current password is incorrect");
+
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newPasswordHash }
+    });
+
+    await this.prisma.authSession.updateMany({
+      where: { userId, status: AuthSessionStatus.active },
+      data: { status: AuthSessionStatus.revoked }
+    });
+
+    return { success: true };
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    if (!user) {
+      // Return success even if user not found to prevent email enumeration
+      return { success: true };
+    }
+
+    // Use AuthSession to store reset token.
+    // The session ID becomes the reset token (UUID) sent to the user's email.
+    // userAgent = 'password-reset' marks this session as a password reset flow.
+    const resetSession = await this.prisma.authSession.create({
+      data: {
+        userId: user.id,
+        refreshTokenHash: await bcrypt.hash(randomUUID(), 12),
+        status: AuthSessionStatus.active,
+        userAgent: "password-reset",
+        expiresAt: new Date(Date.now() + 3600 * 1000) // 1 hour
+      }
+    });
+
+    const token = resetSession.id;
+
+    // TODO: Send email with reset link containing the token
+    // For now, log the token for development purposes
+    console.log(`[Password Reset] Token for ${email}: ${token}`);
+
+    return { success: true };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const resetSession = await this.prisma.authSession.findUnique({
+      where: { id: token }
+    });
+
+    if (!resetSession || resetSession.userAgent !== "password-reset") {
+      throw new NotFoundException("Invalid or expired reset token.");
+    }
+
+    if (resetSession.status !== AuthSessionStatus.active) {
+      throw new UnauthorizedException("Reset token has already been used.");
+    }
+
+    if (resetSession.expiresAt <= new Date()) {
+      throw new UnauthorizedException("Reset token has expired.");
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: resetSession.userId },
+        data: { passwordHash: newPasswordHash }
+      }),
+      this.prisma.authSession.update({
+        where: { id: resetSession.id },
+        data: {
+          status: AuthSessionStatus.revoked,
+          revokedAt: new Date()
+        }
+      }),
+      this.prisma.authSession.updateMany({
+        where: { userId: resetSession.userId, status: AuthSessionStatus.active },
+        data: { status: AuthSessionStatus.revoked }
+      })
+    ]);
 
     return { success: true };
   }

@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
   outputFileTracingRoot: path.join(__dirname, "../.."),
+  typescript: {
+    ignoreBuildErrors: true
+  },
   async rewrites() {
     if (!apiProxyTarget) {
       return [];

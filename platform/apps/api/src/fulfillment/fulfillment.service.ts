@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import type { Prisma } from "../../src/generated/prisma/index.js";
 import { OrderStatus } from "../../src/generated/prisma/index.js";
+import { toDisplayAmount } from "../common/money.utils";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 
@@ -40,6 +41,10 @@ export class FulfillmentService {
     private readonly prisma: PrismaService,
     private readonly realtimeGateway: RealtimeGateway
   ) {}
+
+  async getOrderForBoard(orderId: string) {
+    return this.getOrderSnapshot(orderId);
+  }
 
   async getBoard(params: {
     locationCode?: string;
@@ -253,10 +258,10 @@ export class FulfillmentService {
       customerEmail: order.customerEmail,
       customerPhone: order.customerPhone,
       specialInstructions: order.specialInstructions,
-      subtotalAmount: this.toDisplayAmount(order.subtotalAmount),
-      discountAmount: this.toDisplayAmount(order.discountAmount),
-      taxAmount: this.toDisplayAmount(order.taxAmount),
-      totalAmount: this.toDisplayAmount(order.totalAmount),
+      subtotalAmount: toDisplayAmount(order.subtotalAmount),
+      discountAmount: toDisplayAmount(order.discountAmount),
+      taxAmount: toDisplayAmount(order.taxAmount),
+      totalAmount: toDisplayAmount(order.totalAmount),
       createdAt: order.createdAt,
       acceptedAt: order.acceptedAt,
       preparingAt: order.preparingAt,
@@ -282,13 +287,13 @@ export class FulfillmentService {
         quantity: item.quantity,
         itemName: item.itemName,
         notes: item.notes,
-        unitPriceAmount: this.toDisplayAmount(item.unitPriceAmount),
-        lineTotalAmount: this.toDisplayAmount(item.lineTotalAmount),
+        unitPriceAmount: toDisplayAmount(item.unitPriceAmount),
+        lineTotalAmount: toDisplayAmount(item.lineTotalAmount),
         modifiers: item.modifiers.map((modifier: any) => ({
           id: modifier.id,
           modifierGroupName: modifier.modifierGroupName,
           modifierOptionName: modifier.modifierOptionName,
-          priceDeltaAmount: this.toDisplayAmount(modifier.priceDeltaAmount)
+          priceDeltaAmount: toDisplayAmount(modifier.priceDeltaAmount)
         }))
       })),
       payments: order.payments.map((payment: any) => ({
@@ -298,12 +303,12 @@ export class FulfillmentService {
         currencyCode: payment.currencyCode,
         providerIntentId: payment.providerIntentId,
         amountAuthorized: payment.amountAuthorized
-          ? this.toDisplayAmount(payment.amountAuthorized)
+          ? toDisplayAmount(payment.amountAuthorized)
           : null,
         amountCaptured: payment.amountCaptured
-          ? this.toDisplayAmount(payment.amountCaptured)
+          ? toDisplayAmount(payment.amountCaptured)
           : null,
-        amountRefunded: this.toDisplayAmount(payment.amountRefunded),
+        amountRefunded: toDisplayAmount(payment.amountRefunded),
         failureCode: payment.failureCode,
         failureMessage: payment.failureMessage,
         createdAt: payment.createdAt
@@ -312,7 +317,4 @@ export class FulfillmentService {
     };
   }
 
-  private toDisplayAmount(value: unknown): number {
-    return Number(Number(value ?? 0).toFixed(2));
-  }
 }

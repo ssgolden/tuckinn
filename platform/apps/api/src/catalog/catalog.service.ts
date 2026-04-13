@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException
 } from "@nestjs/common";
@@ -114,7 +115,19 @@ export class CatalogService {
     });
   }
 
-  async listProducts(locationCode?: string, categorySlug?: string) {
+  async getCategory(categoryId: string) {
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId }
+    });
+
+    if (!category) {
+      throw new NotFoundException("Category not found.");
+    }
+
+    return category;
+  }
+
+  async listProducts(locationCode?: string, categorySlug?: string, search?: string, status?: ProductStatus) {
     const products = await this.prisma.product.findMany({
       where: {
         ...(locationCode
@@ -130,64 +143,23 @@ export class CatalogService {
                 slug: categorySlug
               }
             }
+          : {}),
+        ...(status ? { status } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { shortDescription: { contains: search, mode: "insensitive" } },
+                { longDescription: { contains: search, mode: "insensitive" } }
+              ]
+            }
           : {})
       },
-      include: {
-        category: true,
-        imageAsset: true,
-        variants: {
-          orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
-        },
-        modifierGroups: {
-          include: {
-            modifierGroup: {
-              include: {
-                options: {
-                  orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
-                }
-              }
-            }
-          },
-          orderBy: [{ sortOrder: "asc" }]
-        }
-      },
+      include: this.productInclude,
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
     });
 
-    return products.map(product => ({
-      id: product.id,
-      slug: product.slug,
-      name: product.name,
-      shortDescription: product.shortDescription,
-      longDescription: product.longDescription,
-      imageUrl: product.imageAsset?.url ?? null,
-      imageAltText: product.imageAsset?.altText ?? null,
-      isFeatured: product.isFeatured,
-      sortOrder: product.sortOrder,
-      status: product.status,
-      category: product.category
-        ? {
-            id: product.category.id,
-            name: product.category.name
-          }
-        : null,
-      variants: product.variants.map(variant => ({
-        id: variant.id,
-        name: variant.name,
-        priceAmount: Number(variant.priceAmount),
-        sku: variant.sku
-      })),
-      modifierGroups: product.modifierGroups.map(entry => ({
-        modifierGroup: {
-          id: entry.modifierGroup.id,
-          name: entry.modifierGroup.name,
-          options: entry.modifierGroup.options.map(option => ({
-            id: option.id,
-            name: option.name
-          }))
-        }
-      }))
-    }));
+    return products.map(product => this.formatProduct(product));
   }
 
   async createCategory(dto: CreateCategoryDto) {
@@ -244,32 +216,145 @@ export class CatalogService {
     });
   }
 
-  async createProduct(dto: CreateProductDto) {
-    const productContext = await this.prisma.category.findFirst({
-      where: {
-        slug: dto.categorySlug,
-        location: {
-          code: dto.locationCode
-        }
-      },
-      include: {
-        location: true
-      }
+  async deleteCategory(categoryId: string) {
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId }
     });
 
-    if (!productContext?.location) {
-      throw new NotFoundException("Category or location not found.");
+    if (!category) {
+      throw new NotFoundException("Category not found.");
+    }
+
+    const productCount = await this.prisma.product.count({
+      where: { categoryId }
+    });
+
+    if (productCount > 0) {
+      throw new ConflictException(
+        `Cannot delete category: ${productCount} product(s) reference this category.`
+      );
+    }
+
+    await this.prisma.category.delete({ where: { id: categoryId } });
+    return { success: true };
+  }
+
+  async getProduct(productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: this.productInclude
+    });
+
+    if (!product) {
+      throw new NotFoundException("Product not found.");
+    }
+
+    return this.formatProduct(product);
+  }
+
+  private readonly productInclude = {
+    category: true,
+    imageAsset: true,
+    variants: {
+      orderBy: [{ isDefault: "desc" as const }, { priceAmount: "asc" as const }]
+    },
+    modifierGroups: {
+      include: {
+        modifierGroup: {
+          include: {
+            options: {
+              orderBy: [{ sortOrder: "asc" as const }, { name: "asc" as const }]
+            }
+          }
+        }
+      },
+      orderBy: [{ sortOrder: "asc" as const }]
+    }
+  };
+
+  private formatProduct(product: any) {
+    return {
+      id: product.id,
+      slug: product.slug,
+      name: product.name,
+      shortDescription: product.shortDescription,
+      longDescription: product.longDescription,
+      imageUrl: product.imageAsset?.url ?? null,
+      imageAltText: product.imageAsset?.altText ?? null,
+      isFeatured: product.isFeatured,
+      sortOrder: product.sortOrder,
+      status: product.status,
+      createdAt: product.createdAt ? new Date(product.createdAt).toISOString() : null,
+      category: product.category
+        ? { id: product.category.id, name: product.category.name, slug: product.category.slug }
+        : null,
+      variants: product.variants.map((variant: any) => ({
+        id: variant.id,
+        name: variant.name,
+        priceAmount: Number(variant.priceAmount),
+        isDefault: variant.isDefault,
+        sku: variant.sku
+      })),
+      modifierGroups: product.modifierGroups.map((entry: any) => ({
+        id: entry.modifierGroup.id,
+        name: entry.modifierGroup.name,
+        description: entry.modifierGroup.description,
+        minSelect: entry.modifierGroup.minSelect,
+        maxSelect: entry.modifierGroup.maxSelect,
+        isRequired: entry.modifierGroup.isRequired,
+        sortOrder: entry.sortOrder,
+        options: entry.modifierGroup.options.map((option: any) => ({
+          id: option.id,
+          name: option.name,
+          priceDeltaAmount: Number(option.priceDeltaAmount),
+          isDefault: option.isDefault,
+          isActive: option.isActive,
+          sortOrder: option.sortOrder
+        }))
+      }))
+    };
+  }
+
+  async createProduct(dto: CreateProductDto) {
+    const location = await this.prisma.location.findUnique({
+      where: { code: dto.locationCode }
+    });
+
+    if (!location) {
+      throw new NotFoundException("Location not found.");
+    }
+
+    let categoryId: string | undefined;
+    if (dto.categoryId) {
+      const category = await this.prisma.category.findUnique({
+        where: { id: dto.categoryId }
+      });
+      if (!category) {
+        throw new NotFoundException("Category not found.");
+      }
+      categoryId = category.id;
+    } else if (dto.categorySlug) {
+      const category = await this.prisma.category.findFirst({
+        where: {
+          slug: dto.categorySlug,
+          locationId: location.id
+        }
+      });
+      if (!category) {
+        throw new NotFoundException("Category not found.");
+      }
+      categoryId = category.id;
     }
 
     const product = await this.prisma.product.upsert({
       where: {
         locationId_slug: {
-          locationId: productContext.location.id,
+          locationId: location.id,
           slug: dto.slug
         }
       },
       update: {
-        categoryId: productContext.id,
+        categoryId: categoryId ?? undefined,
         name: dto.name,
         shortDescription: dto.shortDescription,
         longDescription: dto.longDescription,
@@ -278,8 +363,8 @@ export class CatalogService {
         status: ProductStatus.active
       },
       create: {
-        locationId: productContext.location.id,
-        categoryId: productContext.id,
+        locationId: location.id,
+        categoryId: categoryId ?? undefined,
         slug: dto.slug,
         name: dto.name,
         shortDescription: dto.shortDescription,
@@ -325,28 +410,12 @@ export class CatalogService {
       imageAltText: dto.imageAltText
     });
 
-    return this.prisma.product.findUniqueOrThrow({
+    const created = await this.prisma.product.findUniqueOrThrow({
       where: { id: product.id },
-      include: {
-        category: true,
-        imageAsset: true,
-        variants: {
-          orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
-        },
-        modifierGroups: {
-          include: {
-            modifierGroup: {
-              include: {
-                options: {
-                  orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
-                }
-              }
-            }
-          },
-          orderBy: [{ sortOrder: "asc" }]
-        }
-      }
+      include: this.productInclude
     });
+
+    return this.formatProduct(created);
   }
 
   async updateProduct(productId: string, dto: UpdateProductDto) {
@@ -363,8 +432,12 @@ export class CatalogService {
       throw new NotFoundException("Product not found.");
     }
 
-    let categoryId: string | undefined;
-    if (dto.categorySlug) {
+    let categoryId: string | null | undefined;
+    if (dto.categoryId) {
+      categoryId = dto.categoryId;
+    } else if (dto.categoryId === null) {
+      categoryId = null;
+    } else if (dto.categorySlug) {
       const category = await this.prisma.category.findFirst({
         where: {
           slug: dto.categorySlug,
@@ -382,7 +455,7 @@ export class CatalogService {
     await this.prisma.product.update({
       where: { id: productId },
       data: {
-        categoryId,
+        ...(categoryId === null ? { categoryId: null } : categoryId ? { categoryId } : {}),
         slug: dto.slug ?? undefined,
         name: dto.name ?? undefined,
         shortDescription: dto.shortDescription ?? undefined,
@@ -416,55 +489,25 @@ export class CatalogService {
 
     await this.syncProductImage(productId, dto);
 
-    return this.prisma.product.findUniqueOrThrow({
+    const updated = await this.prisma.product.findUniqueOrThrow({
       where: { id: productId },
-      include: {
-        category: true,
-        imageAsset: true,
-        variants: {
-          orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
-        },
-        modifierGroups: {
-          include: {
-            modifierGroup: {
-              include: {
-                options: {
-                  orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
-                }
-              }
-            }
-          },
-          orderBy: [{ sortOrder: "asc" }]
-        }
-      }
+      include: this.productInclude
     });
+
+    return this.formatProduct(updated);
   }
 
   async setProductStatus(productId: string, status: ProductStatus) {
     await this.ensureProduct(productId);
-    return this.prisma.product.update({
+    await this.prisma.product.update({
       where: { id: productId },
-      data: { status },
-      include: {
-        category: true,
-        imageAsset: true,
-        variants: {
-          orderBy: [{ isDefault: "desc" }, { priceAmount: "asc" }]
-        },
-        modifierGroups: {
-          include: {
-            modifierGroup: {
-              include: {
-                options: {
-                  orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
-                }
-              }
-            }
-          },
-          orderBy: [{ sortOrder: "asc" }]
-        }
-      }
+      data: { status }
     });
+    const product = await this.prisma.product.findUniqueOrThrow({
+      where: { id: productId },
+      include: this.productInclude
+    });
+    return this.formatProduct(product);
   }
 
   async deleteProduct(productId: string) {

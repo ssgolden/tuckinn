@@ -10,7 +10,7 @@ export const styles: Record<string, CSSProperties> = {
   authCard: {
     maxWidth: 640,
     margin: "8vh auto 0",
-    background: "linear-gradient(180deg, rgba(255,253,250,0.98), rgba(255,247,237,0.98))",
+    background: "var(--staff-panel-strong)",
     border: "1px solid var(--staff-border)",
     borderRadius: 30,
     padding: 32,
@@ -78,8 +78,8 @@ export const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     padding: "8px 12px",
     borderRadius: 999,
-    background: "rgba(255,255,255,0.9)",
-    color: "var(--staff-primary-strong)",
+    background: "rgba(255, 255, 255, 0.06)",
+    color: "var(--staff-text-muted)",
     border: "1px solid var(--staff-border)",
     fontSize: 12,
     fontWeight: 800,
@@ -108,7 +108,7 @@ export const styles: Record<string, CSSProperties> = {
   input: {
     borderRadius: 16,
     border: "1px solid var(--staff-border-strong)",
-    background: "rgba(255,255,255,0.92)",
+    background: "rgba(255, 255, 255, 0.06)",
     color: "var(--staff-text)",
     padding: "14px 16px",
     outline: "none"
@@ -117,7 +117,7 @@ export const styles: Record<string, CSSProperties> = {
     minHeight: 88,
     borderRadius: 16,
     border: "1px solid var(--staff-border-strong)",
-    background: "rgba(255,255,255,0.92)",
+    background: "rgba(255, 255, 255, 0.06)",
     color: "var(--staff-text)",
     padding: "12px 14px",
     resize: "vertical",
@@ -126,7 +126,7 @@ export const styles: Record<string, CSSProperties> = {
   select: {
     borderRadius: 16,
     border: "1px solid var(--staff-border-strong)",
-    background: "rgba(255,255,255,0.96)",
+    background: "rgba(255, 255, 255, 0.06)",
     color: "var(--staff-text)",
     padding: "12px 14px",
     outline: "none"
@@ -154,8 +154,8 @@ export const styles: Record<string, CSSProperties> = {
   secondaryButton: {
     borderRadius: 14,
     border: "1px solid var(--staff-border-strong)",
-    background: "rgba(255,255,255,0.9)",
-    color: "var(--staff-primary-strong)",
+    background: "rgba(255, 255, 255, 0.06)",
+    color: "var(--staff-text)",
     padding: "12px 16px",
     fontWeight: 700,
     cursor: "pointer"
@@ -163,8 +163,8 @@ export const styles: Record<string, CSSProperties> = {
   secondaryButtonSmall: {
     borderRadius: 14,
     border: "1px solid var(--staff-border-strong)",
-    background: "rgba(255,255,255,0.86)",
-    color: "var(--staff-primary-strong)",
+    background: "rgba(255, 255, 255, 0.06)",
+    color: "var(--staff-text)",
     padding: "10px 14px",
     fontWeight: 700,
     cursor: "pointer"
@@ -180,10 +180,10 @@ export const styles: Record<string, CSSProperties> = {
   },
   error: {
     margin: "0 0 16px",
-    color: "#991b1b",
+    color: "#fca5a5",
     padding: "14px 16px",
     borderRadius: 16,
-    background: "rgba(254, 226, 226, 0.92)",
+    background: "rgba(127, 29, 29, 0.4)",
     border: "1px solid rgba(248, 113, 113, 0.24)"
   },
   apiHint: {
@@ -200,7 +200,7 @@ export const styles: Record<string, CSSProperties> = {
     flexWrap: "wrap",
     padding: 24,
     borderRadius: 28,
-    background: "linear-gradient(180deg, rgba(255,253,250,0.95), rgba(254,242,242,0.9))",
+    background: "var(--staff-panel-strong)",
     border: "1px solid var(--staff-border)",
     boxShadow: "var(--staff-shadow)"
   },
@@ -235,14 +235,14 @@ export const styles: Record<string, CSSProperties> = {
     letterSpacing: "0.04em"
   },
   connectionChipLive: {
-    background: "rgba(220, 252, 231, 0.92)",
-    color: "#166534",
-    borderColor: "rgba(74, 222, 128, 0.22)"
+    background: "rgba(34, 197, 94, 0.15)",
+    color: "#4ade80",
+    borderColor: "rgba(74, 222, 128, 0.2)"
   },
   connectionChipOffline: {
-    background: "rgba(254, 243, 199, 0.92)",
-    color: "#92400e",
-    borderColor: "rgba(251, 191, 36, 0.24)"
+    background: "rgba(234, 179, 8, 0.15)",
+    color: "#fbbf24",
+    borderColor: "rgba(251, 191, 36, 0.2)"
   },
   filtersPanel: {
     display: "grid",
@@ -266,7 +266,7 @@ export const styles: Record<string, CSSProperties> = {
     minWidth: 260,
     padding: "12px 14px",
     borderRadius: 18,
-    background: "rgba(255,255,255,0.9)",
+    background: "rgba(255, 255, 255, 0.04)",
     border: "1px solid var(--staff-border)"
   },
   eventLabel: {
@@ -288,7 +288,7 @@ export const styles: Record<string, CSSProperties> = {
   metricCard: {
     padding: 18,
     borderRadius: 20,
-    background: "rgba(255,255,255,0.9)",
+    background: "rgba(255, 255, 255, 0.04)",
     border: "1px solid var(--staff-border)"
   },
   metricLabel: {
@@ -417,7 +417,7 @@ export const styles: Record<string, CSSProperties> = {
   itemRow: {
     padding: "12px 14px",
     borderRadius: 16,
-    background: "rgba(255,255,255,0.9)",
+    background: "rgba(255, 255, 255, 0.04)",
     border: "1px solid var(--staff-border)"
   },
   noteBlock: {
@@ -425,8 +425,9 @@ export const styles: Record<string, CSSProperties> = {
     gap: 6,
     padding: "12px 14px",
     borderRadius: 16,
-    background: "rgba(254, 243, 199, 0.76)",
-    border: "1px solid rgba(202, 138, 4, 0.16)"
+    background: "rgba(234, 179, 8, 0.08)",
+    border: "1px solid rgba(202, 138, 4, 0.2)",
+    color: "#fde68a"
   },
   actionRow: {
     display: "flex",
@@ -437,13 +438,117 @@ export const styles: Record<string, CSSProperties> = {
     padding: 24,
     borderRadius: 20,
     border: "1px dashed var(--staff-border-strong)",
-    background: "rgba(255,255,255,0.78)"
+    background: "rgba(255, 255, 255, 0.02)"
   },
   emptyState: {
     padding: 32,
     borderRadius: 24,
     border: "1px dashed var(--staff-border-strong)",
-    background: "rgba(255,255,255,0.78)"
+    background: "rgba(255, 255, 255, 0.02)"
+  },
+  confirmOverlay: {
+    position: "fixed",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(0, 0, 0, 0.7)",
+    zIndex: 1000
+  },
+  confirmDialog: {
+    background: "var(--staff-panel-strong)",
+    borderRadius: 24,
+    padding: 28,
+    maxWidth: 440,
+    width: "90%",
+    border: "1px solid var(--staff-border)",
+    boxShadow: "var(--staff-shadow)",
+    display: "grid",
+    gap: 18
+  },
+  confirmTitle: {
+    margin: 0,
+    fontFamily: 'var(--font-display), Impact, sans-serif',
+    fontSize: 22,
+    letterSpacing: "0.03em",
+    color: "var(--staff-primary-strong)",
+    textTransform: "uppercase",
+    fontWeight: 400
+  },
+  confirmMessage: {
+    margin: 0,
+    color: "var(--staff-text-muted)",
+    lineHeight: 1.6
+  },
+  confirmActions: {
+    display: "flex",
+    gap: 10,
+    justifyContent: "flex-end"
+  },
+  connectionDot: {
+    display: "inline-block",
+    width: 10,
+    height: 10,
+    borderRadius: "50%",
+    marginRight: 8,
+    flexShrink: 0
+  },
+  connectionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 12px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.04em"
+  },
+  soundToggle: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 12px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.04em",
+    cursor: "pointer",
+    border: "1px solid var(--staff-border)"
+  },
+  expandButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "6px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+    border: "1px solid var(--staff-border)",
+    background: "rgba(255, 255, 255, 0.06)",
+    color: "var(--staff-text-muted)",
+    transition: "background 0.15s, color 0.15s"
+  },
+  itemsSummary: {
+    margin: 0,
+    color: "var(--staff-text-dim)",
+    fontSize: 13,
+    lineHeight: 1.5
+  },
+  customerContact: {
+    display: "grid",
+    gap: 4,
+    padding: "10px 14px",
+    borderRadius: 16,
+    background: "rgba(255, 255, 255, 0.04)",
+    border: "1px solid var(--staff-border)",
+    fontSize: 13
+  },
+  expandContentInner: {
+    display: "grid",
+    gap: 16
   }
 };
 
@@ -453,18 +558,22 @@ export function getStatusBadgeStyle(status: string): CSSProperties {
   };
 
   if (status === "ready") {
-    return { ...base, background: "rgba(220, 252, 231, 0.92)", color: "#166534" };
+    return { ...base, background: "rgba(34, 197, 94, 0.15)", color: "#4ade80" };
   }
 
   if (status === "preparing" || status === "accepted") {
-    return { ...base, background: "rgba(254, 243, 199, 0.92)", color: "#92400e" };
+    return { ...base, background: "rgba(234, 179, 8, 0.15)", color: "#fbbf24" };
   }
 
   if (status === "cancelled" || status === "refunded") {
-    return { ...base, background: "rgba(254, 226, 226, 0.92)", color: "#991b1b" };
+    return { ...base, background: "rgba(239, 68, 68, 0.15)", color: "#f87171" };
   }
 
-  return { ...base, background: "rgba(255, 237, 213, 0.92)", color: "var(--staff-primary-strong)" };
+  if (status === "completed") {
+    return { ...base, background: "rgba(34, 197, 94, 0.12)", color: "#86efac" };
+  }
+
+  return { ...base, background: "rgba(185, 28, 28, 0.15)", color: "#fca5a5" };
 }
 
 export function getUrgencyPillStyle(tone: string): CSSProperties {

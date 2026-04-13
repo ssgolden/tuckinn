@@ -6,7 +6,10 @@ package-lock.json
 .env
 .env.local
 .env.production
-.env.*.local
+.env.*
+!.env.example
+!.env.production.example
+!.env.*.local
 **/.env
 **/.env.local
 **/.env.production
@@ -20,6 +23,7 @@ package-lock.json
 # Backups — use git/VPS snapshots instead
 backup/
 backup_*/
+deployment_package/
 deployment_package_*/
 
 # Build artifacts
@@ -30,9 +34,23 @@ platform/apps/api/src/generated/
 
 # Temp files
 tmp-*.png
+tmp-*
 
 # Credentials — no plain-text secrets
 *.pem
 *.key
 login.txt
 credentials.*
+
+# Platform specific
+platform/apps/api/src/generated/
+platform/.next/
+.next/
+platform/apps/*/node_modules/
+platform/runtime-logs/
+platform/test-results/
+platform/tmp-*.png
+
+# Root legacy files (keep as reference, but don't track build artifacts)
+/database.sqlite
+/backend/

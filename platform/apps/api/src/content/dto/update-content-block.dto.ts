@@ -1,18 +1,15 @@
-import { IsOptional, IsString, IsEnum } from "class-validator";
-
-export enum ContentBlockStatus {
-  draft = "draft",
-  published = "published",
-  archived = "archived",
-}
+import { IsEnum, IsObject, IsOptional, IsString, MinLength } from "class-validator";
+import { ContentBlockStatus } from "../../../src/generated/prisma/index.js";
 
 export class UpdateContentBlockDto {
   @IsOptional()
   @IsString()
+  @MinLength(1)
   key?: string;
 
   @IsOptional()
   @IsString()
+  @MinLength(1)
   title?: string;
 
   @IsOptional()
@@ -20,5 +17,6 @@ export class UpdateContentBlockDto {
   status?: ContentBlockStatus;
 
   @IsOptional()
-  payload?: any;
+  @IsObject()
+  payload?: Record<string, unknown>;
 }

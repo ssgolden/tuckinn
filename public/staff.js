@@ -61,7 +61,11 @@ document.addEventListener('alpine:init', () => {
                     credentials: 'same-origin'
                 });
             } catch (error) {
-                console.error('Failed to log out cleanly:', error);
+                if (error instanceof TypeError) {
+                    console.warn('Logout request failed (network error); proceeding with local cleanup');
+                } else {
+                    console.error('Failed to log out cleanly:', error);
+                }
             } finally {
                 this.stopBoard();
                 this.pinError = '';
@@ -73,11 +77,23 @@ document.addEventListener('alpine:init', () => {
             this.loadHistory();
             this.connectSocket();
 
+            // Start polling as fallback until Socket.IO connects
+            this.startPolling();
+        },
+
+        startPolling() {
             if (!this.pollInterval) {
                 this.pollInterval = setInterval(() => {
                     this.loadActiveOrders();
                     this.loadHistory();
                 }, 5000);
+            }
+        },
+
+        stopPolling() {
+            if (this.pollInterval) {
+                clearInterval(this.pollInterval);
+                this.pollInterval = null;
             }
         },
 
@@ -116,10 +132,12 @@ document.addEventListener('alpine:init', () => {
 
             this.socket.on('connect', () => {
                 this.connected = true;
+                this.stopPolling();
             });
 
             this.socket.on('disconnect', () => {
                 this.connected = false;
+                this.startPolling();
             });
 
             this.socket.on('connect_error', error => {

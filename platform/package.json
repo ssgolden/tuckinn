@@ -19,9 +19,7 @@
     "db:studio": "pnpm --filter @tuckinn/api prisma:studio",
     "db:seed": "pnpm --filter @tuckinn/api prisma:seed"
   },
-  "dependencies": {
-    "@prisma/client": "^6.19.3"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@playwright/test": "^1.58.0",
     "prisma": "^6.19.3",

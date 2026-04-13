@@ -5,16 +5,24 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
-  MinLength
+  MinLength,
+  ValidateIf
 } from "class-validator";
 import { ProductStatus } from "../../../src/generated/prisma/index.js";
 
 export class UpdateProductDto {
   @IsOptional()
+  @ValidateIf((o) => !o.categoryId)
   @IsString()
   @MinLength(2)
   categorySlug?: string;
+
+  @IsOptional()
+  @ValidateIf((o) => !o.categorySlug && o.categoryId !== null)
+  @IsUUID()
+  categoryId?: string | null;
 
   @IsOptional()
   @IsString()

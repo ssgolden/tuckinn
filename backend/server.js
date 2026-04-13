@@ -162,7 +162,7 @@ app.use(require('express-session')({
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: 'lax', secure: false }
+    cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }
 }));
 
 // ========================
@@ -203,6 +203,18 @@ function requireStaff(req, res, next) {
 // ========================
 function slugify(text) {
     return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function sanitizeText(str) {
+    if (typeof str !== 'string') return str;
+    return str
+        .trim()
+        .replace(/<[^>]*>/g, '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
 }
 
 function generateOrderNumber() {
@@ -264,7 +276,10 @@ app.get('/api/menu/items/:id', (req, res) => {
 
 // POST /api/orders
 app.post('/api/orders', (req, res) => {
-    const { customer_name, items, phone, order_type, special_instructions, table_number, num_people } = req.body;
+    const { items, order_type, table_number, num_people } = req.body;
+    const customer_name = sanitizeText(req.body.customer_name);
+    const phone = sanitizeText(req.body.phone);
+    const special_instructions = sanitizeText(req.body.special_instructions);
 
     if (!customer_name || !items || items.length === 0) {
         return res.status(400).json({ error: 'Customer name and items are required.' });
@@ -343,7 +358,9 @@ app.post('/api/staff/logout', requireStaff, (req, res) => {
 // ========================
 
 app.post('/api/categories', requireStaff, (req, res) => {
-    const { name, description, sort_order } = req.body;
+    const name = sanitizeText(req.body.name);
+    const description = sanitizeText(req.body.description);
+    const sort_order = req.body.sort_order;
     if (!name) return res.status(400).json({ error: 'Name is required.' });
 
     const slug = slugify(name);
@@ -360,7 +377,9 @@ app.post('/api/categories', requireStaff, (req, res) => {
 });
 
 app.put('/api/categories/:slug', requireStaff, (req, res) => {
-    const { name, description, sort_order, is_visible } = req.body;
+    const name = sanitizeText(req.body.name);
+    const description = sanitizeText(req.body.description);
+    const { sort_order, is_visible } = req.body;
     const oldCat = queryOne('SELECT * FROM categories WHERE slug = ?', [req.params.slug]);
     if (!oldCat) return res.status(404).json({ error: 'Category not found.' });
 
@@ -374,6 +393,9 @@ app.put('/api/categories/:slug', requireStaff, (req, res) => {
         runSql(`UPDATE categories SET slug = ?, name = ?, description = ?, sort_order = ?, is_visible = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`,
             [newSlug, name || oldCat.name, description ?? oldCat.description, sort_order ?? oldCat.sort_order, is_visible ?? oldCat.is_visible, oldCat.slug]
         );
+        if (newSlug !== oldCat.slug) {
+            runSql('UPDATE menu_items SET category_slug = ? WHERE category_slug = ?', [newSlug, oldCat.slug]);
+        }
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -385,6 +407,7 @@ app.delete('/api/categories/:slug', requireStaff, (req, res) => {
     if (!cat) return res.status(404).json({ error: 'Category not found.' });
 
     try {
+        runSql('DELETE FROM menu_items WHERE category_slug = ?', [req.params.slug]);
         runSql('DELETE FROM categories WHERE slug = ?', [req.params.slug]);
         res.json({ success: true });
     } catch (err) {
@@ -397,7 +420,9 @@ app.delete('/api/categories/:slug', requireStaff, (req, res) => {
 // ========================
 
 app.post('/api/menu/items', requireStaff, (req, res) => {
-    const { category_slug, name, description, price, image_path, sort_order, is_visible } = req.body;
+    const { category_slug, price, image_path, sort_order, is_visible } = req.body;
+    const name = sanitizeText(req.body.name);
+    const description = sanitizeText(req.body.description);
     if (!category_slug || !name || price === undefined) {
         return res.status(400).json({ error: 'category_slug, name, and price are required.' });
     }
@@ -421,7 +446,9 @@ app.post('/api/menu/items', requireStaff, (req, res) => {
 });
 
 app.put('/api/menu/items/:id', requireStaff, (req, res) => {
-    const { name, description, price, image_path, sort_order, is_visible, category_slug } = req.body;
+    const name = sanitizeText(req.body.name);
+    const description = sanitizeText(req.body.description);
+    const { price, image_path, sort_order, is_visible, category_slug } = req.body;
     const item = queryOne('SELECT * FROM menu_items WHERE id = ?', [req.params.id]);
     if (!item) return res.status(404).json({ error: 'Item not found.' });
 
@@ -533,8 +560,8 @@ app.get('/api/images', requireStaff, (req, res) => {
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
-// Serve frontend from parent directory
-const FRONTEND_DIR = path.join(__dirname, '..');
+// Serve frontend from admin directory only
+const FRONTEND_DIR = path.join(__dirname, 'admin');
 app.use(express.static(FRONTEND_DIR));
 app.get('/', (req, res) => {
     res.sendFile(path.join(FRONTEND_DIR, 'index.html'));
@@ -546,10 +573,10 @@ app.get('/', (req, res) => {
 
 app.use((err, req, res, next) => {
     if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'File too large. Max 5MB.' });
-        return res.status(400).json({ error: err.message });
+        if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'File too large. Max 5MB.' });
+        return res.status(500).json({ error: err.message });
     }
-    if (err) return res.status(400).json({ error: err.message });
+    if (err) return res.status(500).json({ error: err.message });
     next();
 });
 

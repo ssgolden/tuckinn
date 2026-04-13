@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, withAdminSession } from "@/lib/api";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,9 +20,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Archive, RotateCcw, Search, Pencil, Plus, Package } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Archive, RotateCcw, Search, Pencil, Plus, Package, AlertTriangle, Image as ImageIcon, ArrowLeft, ArrowRight, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { EmptyState } from "@/components/empty-state";
 
 type Category = { id: string; slug: string; name: string };
 type Product = {
@@ -31,30 +40,13 @@ type Product = {
   variants: { id: string; name: string; priceAmount: number }[];
   category?: { id: string; name: string; slug?: string };
   modifierGroups: unknown[];
+  createdAt?: string;
 };
 
-const sampleCategories: Category[] = [
-  { id: "9396f01f-1808-411b-8f67-b2852b10469c", slug: "meal-deals", name: "Meal Deals" },
-  { id: "5a7e091c-f422-4be7-a3bd-c42043c65179", slug: "originals", name: "Originals" },
-  { id: "58608fa6-dc70-4776-9353-91b41b2b428a", slug: "smoothies", name: "Smoothies" },
-  { id: "686c0234-59bd-421d-9df0-ecc5c4c07e00", slug: "milkshakes", name: "Milkshakes" },
-  { id: "d6557785-e0e5-4cd5-8cf5-f54bd95e53e7", slug: "drinks-and-coffees", name: "Drinks & Coffees" },
-  { id: "1a462893-c73e-4b8c-9741-b6a561488155", slug: "snacks-and-sweets", name: "Snacks & Sweets" },
-];
-
-const sampleProducts: Product[] = [
-  { id: "30c869b9", slug: "option-1", name: "Option 1", shortDescription: "Premium sandwich, canned drink, chocolate, and crisps.", isFeatured: true, status: "active", sortOrder: 0, variants: [{ id: "v1", name: "Default", priceAmount: 9.95 }], category: { id: "9396f01f-1808-411b-8f67-b2852b10469c", name: "Meal Deals" }, modifierGroups: [] },
-  { id: "9bd0c85e", slug: "option-2", name: "Option 2", shortDescription: "Deluxe sandwich, canned drink, and two snack items.", isFeatured: false, status: "active", sortOrder: 1, variants: [{ id: "v2", name: "Default", priceAmount: 13.95 }], category: { id: "9396f01f-1808-411b-8f67-b2852b10469c", name: "Meal Deals" }, modifierGroups: [] },
-  { id: "9d55898a", slug: "tuckinn-proper-original", name: "Tuckinn Proper Original", shortDescription: "House signature sandwich with full custom build options.", isFeatured: true, status: "active", sortOrder: 4, variants: [{ id: "v5", name: "Default", priceAmount: 9.95 }], category: { id: "5a7e091c-f422-4be7-a3bd-c42043c65179", name: "Originals" }, modifierGroups: [] },
-  { id: "3e5619ac", slug: "build-your-own-sandwich", name: "Build Your Own Sandwich", shortDescription: "Start with the base build and make it your own.", isFeatured: true, status: "active", sortOrder: 5, variants: [{ id: "v6", name: "Default", priceAmount: 6.45 }], category: { id: "5a7e091c-f422-4be7-a3bd-c42043c65179", name: "Originals" }, modifierGroups: [] },
-  { id: "10942dde", slug: "tropical-escape", name: "Tropical Escape", shortDescription: "Mango, pineapple, coconut water, and lime.", isFeatured: false, status: "active", sortOrder: 7, variants: [{ id: "v8", name: "Default", priceAmount: 4.95 }], category: { id: "58608fa6-dc70-4776-9353-91b41b2b428a", name: "Smoothies" }, modifierGroups: [] },
-  { id: "a76d8598", slug: "chocolate-milkshake", name: "Chocolate Milkshake", shortDescription: "Thick and creamy chocolate shake.", isFeatured: false, status: "active", sortOrder: 8, variants: [{ id: "v9", name: "Default", priceAmount: 4.45 }], category: { id: "686c0234-59bd-421d-9df0-ecc5c4c07e00", name: "Milkshakes" }, modifierGroups: [] },
-  { id: "bf2e3f4c", slug: "cappuccino", name: "Cappuccino", shortDescription: "Frothy and rich coffee shop standard.", isFeatured: false, status: "active", sortOrder: 10, variants: [{ id: "v11", name: "Default", priceAmount: 3.25 }], category: { id: "d6557785-e0e5-4cd5-8cf5-f54bd95e53e7", name: "Drinks & Coffees" }, modifierGroups: [] },
-  { id: "062d9084", slug: "crisps", name: "Crisps", shortDescription: "Assorted flavours for lunch add-ons.", isFeatured: false, status: "active", sortOrder: 11, variants: [{ id: "v12", name: "Default", priceAmount: 1.50 }], category: { id: "1a462893-c73e-4b8c-9741-b6a561488155", name: "Snacks & Sweets" }, modifierGroups: [] },
-];
+type SortField = "name" | "price" | "date";
 
 export default function ProductsPage() {
-  const { session } = useAuth();
+  const { session, updateSession } = useAuth();
   const router = useRouter();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [filtered, setFiltered] = useState<Product[]>([]);
@@ -64,6 +56,14 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("all");
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(1);
+  const perPage = 20;
+
+  // Confirm dialogs
+  const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
 
   async function loadProducts() {
     setLoading(true);
@@ -79,8 +79,6 @@ export default function ProductsPage() {
       const msg = e instanceof Error ? e.message : "Failed to load products";
       if (msg.includes("401")) {
         setError("Login required to manage products.");
-        setAllProducts(sampleProducts);
-        setCategories(sampleCategories);
       } else {
         setError(msg);
       }
@@ -99,26 +97,59 @@ export default function ProductsPage() {
     }
     if (categoryFilter !== "all") list = list.filter(p => p.category?.id === categoryFilter);
     if (statusFilter !== "all") list = list.filter(p => p.status === statusFilter);
+
+    // Sort
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "name") cmp = a.name.localeCompare(b.name);
+      else if (sortField === "price") cmp = (a.variants?.[0]?.priceAmount ?? 0) - (b.variants?.[0]?.priceAmount ?? 0);
+      else if (sortField === "date") cmp = (a.createdAt || "").localeCompare(b.createdAt || "");
+      return sortDir === "desc" ? -cmp : cmp;
+    });
+
     setFiltered(list);
-  }, [searchQuery, categoryFilter, statusFilter, allProducts]);
+  }, [searchQuery, categoryFilter, statusFilter, sortField, sortDir, allProducts]);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [searchQuery, categoryFilter, statusFilter, sortField, sortDir]);
 
   async function archiveProduct(id: string) {
+    if (!session) return;
     try {
-      await apiFetch(`/catalog/products/${id}/archive`, { method: "PATCH" }, session?.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/catalog/products/${id}/archive`, { method: "PATCH" }, token), updateSession
+      );
       toast.success("Product archived");
       loadProducts();
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Archive failed"); }
   }
 
   async function restoreProduct(id: string) {
+    if (!session) return;
     try {
-      await apiFetch(`/catalog/products/${id}/restore`, { method: "PATCH" }, session?.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/catalog/products/${id}/restore`, { method: "PATCH" }, token), updateSession
+      );
       toast.success("Product restored");
       loadProducts();
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Restore failed"); }
   }
 
+  async function deleteProduct(id: string) {
+    if (!session) return;
+    try {
+      await withAdminSession(session, (token) =>
+        apiFetch(`/catalog/products/${id}`, { method: "DELETE" }, token), updateSession
+      );
+      toast.success("Product deleted");
+      loadProducts();
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Delete failed"); }
+  }
+
   function formatPrice(amount: number) { return `€${Number(amount).toFixed(2)}`; }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const paginated = filtered.slice((page - 1) * perPage, page * perPage);
 
   return (
     <div className="space-y-6">
@@ -137,10 +168,33 @@ export default function ProductsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Search products..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9" />
         </div>
-        <select className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-          <option value="all">All Categories</option>
-          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v ?? "all")}>
+          <SelectTrigger className="min-w-[160px]">
+            <SelectValue placeholder="All Categories" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={sortField} onValueChange={(v) => setSortField(v as SortField)}>
+          <SelectTrigger className="min-w-[140px]">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Name</SelectItem>
+            <SelectItem value="price">Price</SelectItem>
+            <SelectItem value="date">Date Created</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
+          title={sortDir === "asc" ? "Sort ascending" : "Sort descending"}
+        >
+          {sortDir === "asc" ? "A-Z" : "Z-A"}
+        </Button>
         <div className="flex gap-1">
           {(["all", "active", "archived"] as const).map(s => (
             <Button key={s} variant={statusFilter === s ? "default" : "outline"} size="sm" onClick={() => setStatusFilter(s)}>
@@ -150,7 +204,7 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      {error && <Card className="border-amber-200 bg-amber-50"><CardContent className="pt-4 text-sm text-amber-800">⚠️ {error}</CardContent></Card>}
+      {error && <Card className="border-amber-500/30 bg-amber-500/10"><CardContent className="pt-4 text-sm text-amber-400"><AlertTriangle className="h-4 w-4 inline mr-1.5 align-text-bottom" />{error} <Button variant="outline" size="sm" className="ml-3 border-amber-500/30 text-amber-400 hover:bg-amber-500/10" onClick={loadProducts}>Retry</Button></CardContent></Card>}
 
       <Card>
         <CardHeader>
@@ -170,18 +224,25 @@ export default function ProductsPage() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
-              ) : filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No products found.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">Loading...</TableCell></TableRow>
+              ) : paginated.length === 0 ? (
+                <TableRow><TableCell colSpan={6} className="py-2">
+                  <EmptyState
+                    icon={Package}
+                    title="No products found"
+                    description={searchQuery ? "Try adjusting your search query." : "Create your first product to get started."}
+                    action={!searchQuery ? { label: "New Product", onClick: () => router.push("/catalog/products/new") } : undefined}
+                  />
+                </TableCell></TableRow>
               ) : (
-                filtered.map(prod => (
+                paginated.map(prod => (
                   <TableRow key={prod.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/catalog/products/${prod.id}`)}>
                     <TableCell>
                       <div className="flex items-center gap-3">
                         {prod.imageUrl ? (
                           <img src={prod.imageUrl} alt={prod.name} className="h-10 w-10 rounded object-cover border" />
                         ) : (
-                          <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center text-xs text-muted-foreground">📷</div>
+                          <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center"><ImageIcon className="h-4 w-4 text-muted-foreground" /></div>
                         )}
                         <div>
                           <span className="font-medium">{prod.name}</span>
@@ -197,11 +258,14 @@ export default function ProductsPage() {
                       <Badge variant={prod.status === "active" ? "default" : "secondary"}>{prod.status}</Badge>
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm" onClick={() => router.push(`/catalog/products/${prod.id}`)}><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button variant="ghost" size="sm" onClick={() => router.push(`/catalog/products/${prod.id}`)} aria-label={`Edit ${prod.name}`}><Pencil className="h-3.5 w-3.5" /></Button>
                       {prod.status === "active" ? (
-                        <Button variant="ghost" size="sm" onClick={() => archiveProduct(prod.id)}><Archive className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => setArchiveTarget(prod)} aria-label={`Archive ${prod.name}`}><Archive className="h-3.5 w-3.5" /></Button>
                       ) : (
-                        <Button variant="ghost" size="sm" onClick={() => restoreProduct(prod.id)}><RotateCcw className="h-3.5 w-3.5" /></Button>
+                        <>
+                          <Button variant="ghost" size="sm" onClick={() => restoreProduct(prod.id)} aria-label={`Restore ${prod.name}`}><RotateCcw className="h-3.5 w-3.5" /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(prod)} aria-label={`Delete ${prod.name}`} className="text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+                        </>
                       )}
                     </TableCell>
                   </TableRow>
@@ -209,8 +273,63 @@ export default function ProductsPage() {
               )}
             </TableBody>
           </Table>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4 border-t mt-4">
+              <p className="text-sm text-muted-foreground">
+                Page {page} of {totalPages} · {filtered.length} product{filtered.length !== 1 ? "s" : ""}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => p - 1)}
+                >
+                  <ArrowLeft className="h-4 w-4 mr-1" /> Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(p => p + 1)}
+                >
+                  Next <ArrowRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* Archive confirmation dialog */}
+      <ConfirmDialog
+        open={!!archiveTarget}
+        onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}
+        title="Archive Product"
+        description={`Are you sure you want to archive "${archiveTarget?.name}"? This will hide it from the menu. You can restore it later.`}
+        confirmLabel="Archive"
+        destructive
+        onConfirm={() => {
+          if (archiveTarget) archiveProduct(archiveTarget.id);
+          setArchiveTarget(null);
+        }}
+      />
+
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title="Delete Product"
+        description={`Are you sure you want to permanently delete "${deleteTarget?.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => {
+          if (deleteTarget) deleteProduct(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 }

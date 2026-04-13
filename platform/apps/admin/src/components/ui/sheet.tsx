@@ -50,6 +50,7 @@ function SheetContent({
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Popup
+        aria-modal="true"
         data-slot="sheet-content"
         data-side={side}
         className={cn(

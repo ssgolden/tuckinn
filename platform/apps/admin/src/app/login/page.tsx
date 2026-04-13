@@ -35,16 +35,16 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-stone-50 to-amber-50/30 p-4">
-      <Card className="w-full max-w-md shadow-xl border-stone-200">
+    <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] p-4">
+      <Card className="w-full max-w-md shadow-xl border-border/50 bg-[#111]">
         <CardHeader className="text-center space-y-3 pb-2">
-          <div className="mx-auto w-20 h-20 relative rounded-xl overflow-hidden ring-2 ring-stone-200">
+          <div className="mx-auto w-20 h-20 relative rounded-xl overflow-hidden ring-2 ring-border/50">
             <Image src="/logo.jpg" alt="Tuckinn Proper" fill className="object-cover" priority />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">
             Tuckinn Proper
           </CardTitle>
-          <CardDescription className="text-stone-500">
+          <CardDescription>
             Sign in to the operations control panel
           </CardDescription>
         </CardHeader>
@@ -74,7 +74,7 @@ export default function LoginPage() {
               />
             </div>
             {error && (
-              <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+              <div className="rounded-md bg-destructive/10 border border-destructive/30 p-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -83,10 +83,10 @@ export default function LoginPage() {
               className="w-full"
               disabled={isPending}
             >
-              {isPending ? "Signing in…" : "Sign in"}
+              {isPending ? "Signing in..." : "Sign in"}
             </Button>
           </form>
-          <p className="mt-4 text-center text-xs text-stone-400">
+          <p className="mt-4 text-center text-xs text-muted-foreground">
             Staff and admin access only.
           </p>
         </CardContent>

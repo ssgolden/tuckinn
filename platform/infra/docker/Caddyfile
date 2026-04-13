@@ -1,19 +1,64 @@
+(security_headers) {
+	header {
+		# Prevent MIME type sniffing
+		X-Content-Type-Options "nosniff"
+		# Prevent clickjacking - allow same-origin framing only
+		X-Frame-Options "SAMEORIGIN"
+		# Enable browser XSS filter
+		X-XSS-Protection "1; mode=block"
+		# Referrer policy - send origin only on cross-origin
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Permissions policy - restrict browser features
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		# Content Security Policy
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+		# HSTS - enforce HTTPS for 1 year (enable after confirming HTTPS works)
+		# Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# Remove server header
+		-Server
+	}
+}
+
 {$STORE_DOMAIN} {
-  encode gzip zstd
-  reverse_proxy storefront:3000
+	encode gzip zstd
+	reverse_proxy storefront:3000
+	import security_headers
+
+	# sslip.io domains cannot auto-provision Let's Encrypt certs.
+	# For development: use self-signed (below)
+	# For production: remove "tls internal" and configure explicit certs, e.g.:
+	#   tls /etc/certs/store.crt /etc/certs/store.key
+	tls internal
 }
 
 {$ADMIN_DOMAIN} {
-  encode gzip zstd
-  reverse_proxy admin:3000
+	encode gzip zstd
+	reverse_proxy admin:3000
+	import security_headers
+	tls internal
 }
 
 {$STAFF_DOMAIN} {
-  encode gzip zstd
-  reverse_proxy staff:3000
+	encode gzip zstd
+	reverse_proxy staff:3000
+	import security_headers
+	tls internal
 }
 
 {$API_DOMAIN} {
-  encode gzip zstd
-  reverse_proxy api:3200
+	encode gzip zstd
+	import security_headers
+
+	# Restrict Swagger/API docs to internal network only
+	@api_docs path /api/docs* /api/swagger* /api-json /api-json*
+	handle @api_docs {
+		@internal not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/8
+		respond @internal 403 {
+			close
+		}
+		reverse_proxy api:3200
+	}
+
+	reverse_proxy api:3200
+	tls internal
 }

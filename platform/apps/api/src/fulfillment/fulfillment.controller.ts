@@ -22,6 +22,11 @@ import { FulfillmentService } from "./fulfillment.service";
 export class FulfillmentController {
   constructor(private readonly fulfillmentService: FulfillmentService) {}
 
+  @Get("orders/:orderId")
+  getOrder(@Param("orderId") orderId: string) {
+    return this.fulfillmentService.getOrderForBoard(orderId);
+  }
+
   @Get("board")
   getBoard(
     @Query("locationCode") locationCode?: string,

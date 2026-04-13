@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
+import { apiFetch, withAdminSession } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,9 +14,57 @@ import {
 } from "@/components/ui/card";
 import { User } from "lucide-react";
 import { toast } from "sonner";
+import { useState, type FormEvent } from "react";
 
 export default function ProfilePage() {
-  const { session, logout } = useAuth();
+  const { session, logout, updateSession } = useAuth();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handlePasswordChange(e: FormEvent) {
+    e.preventDefault();
+
+    if (!currentPassword) {
+      toast.error("Enter your current password.");
+      return;
+    }
+    if (!newPassword) {
+      toast.error("Enter a new password.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      toast.error("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("New passwords do not match.");
+      return;
+    }
+
+    if (!session) return;
+    setSubmitting(true);
+    try {
+      await withAdminSession(session, (token) =>
+        apiFetch("/auth/password", {
+          method: "PATCH",
+          body: JSON.stringify({
+            currentPassword,
+            newPassword,
+          }),
+        }, token), updateSession
+      );
+      toast.success("Password updated successfully.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to update password.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -60,7 +109,7 @@ export default function ProfilePage() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Session</span>
-                <span className="text-xs">{session?.accessToken === "dev-bypass" ? "Dev Bypass" : "Authenticated"}</span>
+                <span className="text-xs">{session?.accessToken ? "Authenticated" : "No session"}</span>
               </div>
             </div>
           </CardContent>
@@ -71,30 +120,59 @@ export default function ProfilePage() {
             <CardTitle>Change Password</CardTitle>
             <CardDescription>Update your login credentials.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="current">Current Password</Label>
-              <Input id="current" type="password" placeholder="••••••••" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new">New Password</Label>
-              <Input id="new" type="password" placeholder="••••••••" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm">Confirm New Password</Label>
-              <Input id="confirm" type="password" placeholder="••••••••" />
-            </div>
-            <Button className="w-full" onClick={() => toast.info("Password change API coming soon")}>
-              Update Password
-            </Button>
+          <CardContent>
+            <form onSubmit={handlePasswordChange} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="current">Current Password</Label>
+                <Input
+                  id="current"
+                  type="password"
+                  placeholder="••••••••"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  autoComplete="current-password"
+                  aria-describedby="current-help"
+                />
+                <p id="current-help" className="text-xs text-muted-foreground">Enter your current password to verify your identity.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new">New Password</Label>
+                <Input
+                  id="new"
+                  type="password"
+                  placeholder="••••••••"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
+                  aria-describedby="new-help"
+                />
+                <p id="new-help" className="text-xs text-muted-foreground">Must be at least 8 characters.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm">Confirm New Password</Label>
+                <Input
+                  id="confirm"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                  aria-describedby="confirm-help"
+                />
+                <p id="confirm-help" className="text-xs text-muted-foreground">Re-enter your new password to confirm.</p>
+              </div>
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? "Updating..." : "Update Password"}
+              </Button>
+            </form>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="border-red-200 bg-red-50">
+      <Card className="border-destructive/30 bg-destructive/10">
         <CardHeader>
-          <CardTitle className="text-red-800">Danger Zone</CardTitle>
-          <CardDescription className="text-red-600">Irreversible actions.</CardDescription>
+          <CardTitle className="text-destructive">Danger Zone</CardTitle>
+          <CardDescription className="text-destructive/80">Irreversible actions.</CardDescription>
         </CardHeader>
         <CardContent>
           <Button variant="destructive" onClick={() => { logout(); toast.success("Signed out"); }}>

@@ -20,7 +20,7 @@ export function BasketUpsells({
   }
 
   return (
-    <section className="basket-upsells">
+    <section className="basket-upsells" aria-label="Basket upsell suggestions">
       <div className="basket-upsells-head">
         <h3>Add something extra</h3>
         <p>{body}</p>
@@ -34,7 +34,7 @@ export function BasketUpsells({
             0;
 
           return (
-            <article key={product.id} className="basket-upsell-card">
+            <article key={product.id} className="basket-upsell-card" aria-label={product.name}>
               <div>
                 <strong>{product.name}</strong>
                 <p>{product.shortDescription || "A fast extra to round out lunch."}</p>
@@ -46,6 +46,7 @@ export function BasketUpsells({
                   className="secondary-action"
                   disabled={isPendingAction}
                   onClick={() => onAdd(product)}
+                  aria-label={`Add ${product.name} to basket`}
                 >
                   {isPendingAction ? "Adding..." : "Add to basket"}
                 </button>
@@ -54,6 +55,22 @@ export function BasketUpsells({
             </article>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+export function BasketUpsellsSkeleton() {
+  return (
+    <section className="basket-upsells" aria-hidden="true">
+      <div className="basket-upsells-head">
+        <div className="skeleton skeleton-heading" style={{ width: "50%", height: 18 }} />
+        <div className="skeleton skeleton-text" />
+      </div>
+      <div className="basket-upsell-grid">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="skeleton-card" style={{ height: 100 }} />
+        ))}
       </div>
     </section>
   );

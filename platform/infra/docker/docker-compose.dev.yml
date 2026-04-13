@@ -1,0 +1,207 @@
+name: tuckinn-platform-dev
+
+# Development Docker Compose - standalone, not an overlay
+# Usage: docker compose -f docker-compose.dev.yml up
+#
+# This is a simplified dev setup that:
+# - Exposes database/redis ports to host for local tooling
+# - Includes Mailpit for email testing
+# - Uses relaxed resource limits
+# - Points to .env (not .env.production)
+
+x-logging: &dev-logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "2019:2019"
+    environment:
+      STORE_DOMAIN: ${STORE_DOMAIN:-localhost}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-admin.localhost}
+      STAFF_DOMAIN: ${STAFF_DOMAIN:-staff.localhost}
+      API_DOMAIN: ${API_DOMAIN:-api.localhost}
+      CADDY_ADMIN: "0.0.0.0:2019"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      storefront:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+      staff:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *dev-logging
+    networks:
+      - edge
+      - internal
+
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tuckinn_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-tuckinn_platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *dev-logging
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-bookworm
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *dev-logging
+    networks:
+      - internal
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+    logging: *dev-logging
+    networks:
+      - internal
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      PORT: 3200
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    volumes:
+      - api_uploads:/app/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3200/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *dev-logging
+    networks:
+      - internal
+
+  storefront:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.next
+      args:
+        APP_NAME: storefront
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3200/api}
+        NEXT_PUBLIC_ADMIN_APP_URL: ${NEXT_PUBLIC_ADMIN_APP_URL:-http://localhost:3101}
+        NEXT_PUBLIC_STAFF_APP_URL: ${NEXT_PUBLIC_STAFF_APP_URL:-http://localhost:3102}
+    restart: unless-stopped
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *dev-logging
+    networks:
+      - internal
+
+  admin:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.next
+      args:
+        APP_NAME: admin
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3200/api}
+        NEXT_PUBLIC_ADMIN_APP_URL: ${NEXT_PUBLIC_ADMIN_APP_URL:-http://localhost:3101}
+        NEXT_PUBLIC_STAFF_APP_URL: ${NEXT_PUBLIC_STAFF_APP_URL:-http://localhost:3102}
+    restart: unless-stopped
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *dev-logging
+    networks:
+      - internal
+
+  staff:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.next
+      args:
+        APP_NAME: staff
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3200/api}
+        NEXT_PUBLIC_ADMIN_APP_URL: ${NEXT_PUBLIC_ADMIN_APP_URL:-http://localhost:3101}
+        NEXT_PUBLIC_STAFF_APP_URL: ${NEXT_PUBLIC_STAFF_APP_URL:-http://localhost:3102}
+    restart: unless-stopped
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *dev-logging
+    networks:
+      - internal
+
+volumes:
+  api_uploads:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:
+  internal:

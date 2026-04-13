@@ -6,11 +6,13 @@ type MenuRailProps = {
 
 export function MenuRail({ categories, activeCategoryId, onSelect }: MenuRailProps) {
   return (
-    <div className="menu-rail" aria-label="Menu categories">
+    <div className="menu-rail" role="tablist" aria-label="Menu categories">
       {categories.map(category => (
         <button
           key={category.id}
           type="button"
+          role="tab"
+          aria-selected={activeCategoryId === category.id}
           className={activeCategoryId === category.id ? "nav-pill nav-pill-active" : "nav-pill"}
           onClick={() => onSelect(category.id)}
         >

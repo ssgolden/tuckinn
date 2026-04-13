@@ -1,6 +1,7 @@
 import { ValidationPipe } from "@nestjs/common";
 import express from "express";
 import { NestFactory } from "@nestjs/core";
+import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import type { Request, Response } from "express";
@@ -49,8 +50,10 @@ async function bootstrap() {
   app.setGlobalPrefix("api");
   app.enableCors({
     origin:
-      process.env.NODE_ENV === "production" && allowedOrigins.length
-        ? allowedOrigins
+      process.env.NODE_ENV === "production"
+        ? allowedOrigins.length
+          ? allowedOrigins
+          : []
         : true,
     credentials: true
   });
@@ -61,6 +64,15 @@ async function bootstrap() {
       forbidNonWhitelisted: true
     })
   );
+
+  const config = new DocumentBuilder()
+    .setTitle("Tuckinn Proper API")
+    .setDescription("Food ordering platform API")
+    .setVersion("1.0")
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup("api/docs", app, document);
 
   const port = Number(process.env.PORT || 3200);
   await app.listen(port);

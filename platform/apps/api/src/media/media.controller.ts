@@ -1,6 +1,9 @@
 import {
   BadRequestException,
   Controller,
+  Delete,
+  Get,
+  Param,
   Post,
   Req,
   UploadedFile,
@@ -22,6 +25,11 @@ import { MediaService } from "./media.service";
 @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
 export class MediaController {
   constructor(private readonly mediaService: MediaService) {}
+
+  @Get()
+  listMedia() {
+    return this.mediaService.listMedia();
+  }
 
   @Post("upload")
   @UseInterceptors(
@@ -57,5 +65,11 @@ export class MediaController {
       baseUrl,
       createdById: user.sub
     });
+  }
+
+  @Delete(":mediaId")
+  @Roles(RoleCode.owner, RoleCode.admin)
+  deleteMedia(@Param("mediaId") mediaId: string) {
+    return this.mediaService.deleteMedia(mediaId);
   }
 }

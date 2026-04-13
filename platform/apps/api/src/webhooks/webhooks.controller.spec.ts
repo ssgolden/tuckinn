@@ -6,7 +6,8 @@ describe("WebhooksController", () => {
       processStripeWebhook: jest.fn().mockResolvedValue({ received: true })
     } as any;
 
-    const controller = new WebhooksController(paymentsService);
+    const webhooksService = { getConfig: jest.fn(), updateConfig: jest.fn() } as any;
+    const controller = new WebhooksController(paymentsService, webhooksService);
     const rawBody = Buffer.from("payload");
 
     await expect(

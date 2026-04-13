@@ -128,6 +128,7 @@ model User {
   auditLogs        AuditLog[]
   notifications    Notification[]
   authSessions     AuthSession[]
+  passwordResets   PasswordReset[]
 
   @@map("users")
 }
@@ -642,4 +643,17 @@ model AuthSession {
 
   @@index([userId, status])
   @@map("auth_sessions")
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("password_resets")
 }

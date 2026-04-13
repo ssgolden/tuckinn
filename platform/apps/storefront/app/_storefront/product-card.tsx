@@ -23,7 +23,7 @@ export function ProductCard({
   const isFeatured = product.isFeatured;
 
   return (
-    <article className="product-card">
+    <article className="product-card" role="group" aria-label={product.name}>
       <div className="product-card-copy">
         <div className="product-card-top">
           <div>
@@ -55,7 +55,7 @@ export function ProductCard({
       </div>
       <div className="menu-row-actions">
         {isCustom ? (
-          <button type="button" className="secondary-action" onClick={onCustomise}>
+          <button type="button" className="secondary-action" onClick={onCustomise} aria-label={`Customise ${product.name}`}>
             Customise
           </button>
         ) : null}
@@ -64,10 +64,41 @@ export function ProductCard({
           className={isRecentlyAdded ? "primary-action primary-action-success" : "primary-action"}
           onClick={onAdd}
           disabled={isPendingAction}
+          aria-label={`Add ${product.name} to basket`}
+          aria-live="polite"
         >
           {isPendingAction ? "Updating..." : isRecentlyAdded ? "Added" : "Add to basket"}
         </button>
       </div>
     </article>
+  );
+}
+
+export function ProductCardSkeleton() {
+  return (
+    <div className="skeleton-product-card" aria-hidden="true" role="status">
+      <div style={{ flex: 1 }}>
+        <div className="skeleton skeleton-text-short" />
+        <div className="skeleton skeleton-heading" style={{ width: "40%", height: 18 }} />
+        <div className="skeleton skeleton-text" />
+        <div className="skeleton skeleton-text-short" style={{ width: "60%" }} />
+      </div>
+      <div style={{ width: 80 }}>
+        <div className="skeleton" style={{ height: 44, borderRadius: 20 }} />
+      </div>
+    </div>
+  );
+}
+
+export function ProductCardError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="menu-error-card" role="alert">
+      <span className="material-icons error-card-icon" aria-hidden="true">error_outline</span>
+      <h2>Something went wrong</h2>
+      <p>{message}</p>
+      <button type="button" className="primary-action" onClick={onRetry} aria-label="Retry loading menu">
+        Try again
+      </button>
+    </div>
   );
 }

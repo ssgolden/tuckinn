@@ -10,20 +10,24 @@ async function proxyRequest(request: NextRequest, method: string) {
     ? `${API_BASE}/${apiPath}?${url.searchParams}`
     : `${API_BASE}/${apiPath}`;
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+  const headers: Record<string, string> = {};
   const authHeader = request.headers.get("authorization");
   if (authHeader) {
     headers["Authorization"] = authHeader;
   }
 
-  try {
-    let body: string | undefined;
-    if (method !== "GET" && method !== "HEAD") {
+  let body: string | undefined;
+  if (method !== "GET" && method !== "HEAD") {
+    const contentType = request.headers.get("content-type") || "";
+    if (contentType.includes("multipart/form-data")) {
+      body = await request.text();
+    } else {
+      headers["Content-Type"] = "application/json";
       body = await request.text();
     }
+  }
 
+  try {
     const response = await fetch(fullUrl, { method, headers, body });
 
     const data = await response.text();

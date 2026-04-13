@@ -16,7 +16,7 @@ export function SectionShell({
   children
 }: SectionShellProps) {
   return (
-    <section className={className ? `content-panel ${className}` : "content-panel"}>
+    <section className={className ? `content-panel ${className}` : "content-panel"} aria-label={eyebrow ? `${eyebrow}: ${title}` : title}>
       <div className="panel-head">
         <div>
           {eyebrow ? <p className="section-kicker">{eyebrow}</p> : null}

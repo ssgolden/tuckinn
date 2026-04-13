@@ -70,11 +70,18 @@ export async function apiFetch<T>(
 }
 
 export function saveStaffSession(session: StaffLoginResponse) {
-  localStorage.setItem("tuckinn.staff.session", JSON.stringify(normalizeStaffSession(session)));
+  try {
+    localStorage.setItem("tuckinn.staff.session", JSON.stringify(normalizeStaffSession(session)));
+  } catch {
+    /* Safari incognito — storage unavailable */
+  }
 }
 
 export function loadStaffSession(): StaffLoginResponse | null {
-  const raw = localStorage.getItem("tuckinn.staff.session");
+  let raw: string | null;
+  try { raw = localStorage.getItem("tuckinn.staff.session"); }
+  catch { return null; }
+
   if (!raw) {
     return null;
   }
@@ -87,7 +94,8 @@ export function loadStaffSession(): StaffLoginResponse | null {
 }
 
 export function clearStaffSession() {
-  localStorage.removeItem("tuckinn.staff.session");
+  try { localStorage.removeItem("tuckinn.staff.session"); }
+  catch { /* Safari incognito — storage unavailable */ }
 }
 
 export async function refreshStaffSession(refreshToken: string) {

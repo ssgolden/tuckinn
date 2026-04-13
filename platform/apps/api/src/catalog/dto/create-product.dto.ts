@@ -4,8 +4,10 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
-  MinLength
+  MinLength,
+  ValidateIf
 } from "class-validator";
 
 export class CreateProductDto {
@@ -13,9 +15,16 @@ export class CreateProductDto {
   @MinLength(2)
   locationCode!: string;
 
+  @IsOptional()
+  @ValidateIf((o) => !o.categoryId)
   @IsString()
   @MinLength(2)
-  categorySlug!: string;
+  categorySlug?: string;
+
+  @IsOptional()
+  @ValidateIf((o) => !o.categorySlug)
+  @IsUUID()
+  categoryId?: string;
 
   @IsString()
   @MinLength(2)

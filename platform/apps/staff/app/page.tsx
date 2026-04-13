@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { io } from "socket.io-client";
 import {
   API_BASE_URL,
@@ -18,12 +18,21 @@ import {
   type BoardEventPayload,
   type BoardResponse,
   type StaffScope,
+  STATUS_ACTIONS,
   formatMoney,
   getElapsedLabel,
   getOrderSections,
   humanizeStatus
 } from "./_staff/board";
-import { MetricCard, OrderCard, StaffAuthShell } from "./_staff/components";
+import {
+  ConfirmDialog,
+  ConnectionStatusIndicator,
+  MetricCard,
+  OrderCard,
+  SoundToggle,
+  StaffAuthShell,
+  type ConfirmDialogState
+} from "./_staff/components";
 import { styles } from "./_staff/styles";
 
 const STATUS_OPTIONS = [
@@ -37,6 +46,31 @@ const STATUS_OPTIONS = [
   { value: "refunded", label: "Refunded" }
 ];
 
+const KIND_OPTIONS = [
+  { value: "", label: "All types" },
+  { value: "dine-in", label: "Dine-in" },
+  { value: "takeaway", label: "Takeaway" }
+];
+
+function playOrderBeep() {
+  try {
+    const ctx = new AudioContext();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.frequency.value = 880;
+    oscillator.type = "sine";
+    gain.gain.value = 0.3;
+    oscillator.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    oscillator.stop(ctx.currentTime + 0.5);
+    setTimeout(() => ctx.close(), 1000);
+  } catch {
+    // Audio not available in this environment
+  }
+}
+
 export default function StaffHomePage() {
   const [session, setSession] = useState<StaffLoginResponse | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
@@ -44,10 +78,17 @@ export default function StaffHomePage() {
   const [password, setPassword] = useState("");
   const [scope, setScope] = useState<StaffScope>("active");
   const [statusFilter, setStatusFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState("");
   const [board, setBoard] = useState<BoardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [noteByOrderId, setNoteByOrderId] = useState<Record<string, string>>({});
-  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [socketStatus, setSocketStatus] = useState<"connected" | "reconnecting" | "disconnected">("disconnected");
+  const [disconnectedAt, setDisconnectedAt] = useState<number | null>(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Set<string>>(new Set());
+  const [now, setNow] = useState(Date.now());
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [lastEventLabel, setLastEventLabel] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -71,32 +112,47 @@ export default function StaffHomePage() {
     })();
   }, []);
 
+  // Auto-update elapsed time every 30 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     if (!session) {
       return;
     }
 
-    void loadBoardWithSession(session, scope, statusFilter, "Board refreshed");
-  }, [session, scope, statusFilter]);
+    void loadBoardWithSession(session, scope, statusFilter, kindFilter, "Board refreshed");
+  }, [session, scope, statusFilter, kindFilter]);
 
   useEffect(() => {
     if (!session) {
-      setIsRealtimeConnected(false);
+      setSocketStatus("disconnected");
       return;
     }
 
     const socket = io(SOCKET_BASE_URL, {
       transports: ["websocket"],
-      withCredentials: true
+      withCredentials: true,
+      auth: { token: session.accessToken }
     });
 
     socket.on("connect", () => {
-      setIsRealtimeConnected(true);
+      setSocketStatus("connected");
+      setDisconnectedAt(null);
+      setReconnectAttempts(0);
     });
 
     socket.on("disconnect", () => {
-      setIsRealtimeConnected(false);
-      setLastEventLabel("Realtime reconnecting");
+      setSocketStatus("reconnecting");
+      setDisconnectedAt(Date.now());
+    });
+
+    socket.on("connect_error", () => {
+      setReconnectAttempts(prev => prev + 1);
     });
 
     socket.on("board:refresh", (payload: BoardEventPayload) => {
@@ -106,7 +162,7 @@ export default function StaffHomePage() {
           ? "Storefront payment updated the board"
           : "Staff board refreshed"
       );
-      void loadBoardWithSession(session, scope, statusFilter);
+      void loadBoardWithSession(session, scope, statusFilter, kindFilter);
     });
 
     socket.on("order:updated", (payload: BoardEventPayload) => {
@@ -116,27 +172,35 @@ export default function StaffHomePage() {
           ? `Order moved to ${humanizeStatus(payload.status)}`
           : "Order updated"
       );
-      void loadBoardWithSession(session, scope, statusFilter);
+
+      if (payload.status === "paid" && soundEnabled) {
+        playOrderBeep();
+      }
+
+      void loadBoardWithSession(session, scope, statusFilter, kindFilter);
     });
 
     return () => {
       socket.disconnect();
-      setIsRealtimeConnected(false);
+      setSocketStatus("disconnected");
     };
-  }, [session, scope, statusFilter]);
+  }, [session, scope, statusFilter, kindFilter, soundEnabled]);
 
   const orderSections = useMemo(
     () => getOrderSections(board?.orders ?? [], scope, statusFilter),
     [board?.orders, scope, statusFilter]
   );
 
-  async function loadBoard(token: string, boardScope: StaffScope, boardStatus: string) {
+  async function loadBoard(token: string, boardScope: StaffScope, boardStatus: string, boardKind: string) {
     try {
       setError(null);
       const query = new URLSearchParams();
       query.set("scope", boardScope);
       if (boardStatus) {
         query.set("status", boardStatus);
+      }
+      if (boardKind) {
+        query.set("orderKind", boardKind);
       }
 
       const response = await apiFetch<BoardResponse>(
@@ -155,12 +219,13 @@ export default function StaffHomePage() {
     activeSession: StaffLoginResponse,
     boardScope: StaffScope,
     boardStatus: string,
+    boardKind: string,
     eventLabel?: string
   ) {
     return withStaffSession(
       activeSession,
       async accessToken => {
-        await loadBoard(accessToken, boardScope, boardStatus);
+        await loadBoard(accessToken, boardScope, boardStatus, boardKind);
       },
       setSession
     ).finally(() => {
@@ -218,7 +283,7 @@ export default function StaffHomePage() {
             ),
           setSession
         );
-        await loadBoardWithSession(session, scope, statusFilter, `Marked ${humanizeStatus(status)}`);
+        await loadBoardWithSession(session, scope, statusFilter, kindFilter, `Marked ${humanizeStatus(status)}`);
       } catch (updateError) {
         setError(
           updateError instanceof Error ? updateError.message : "Status update failed."
@@ -233,10 +298,71 @@ export default function StaffHomePage() {
       setSession(null);
       setBoard(null);
       setError(null);
-      setIsRealtimeConnected(false);
+      setSocketStatus("disconnected");
+      setDisconnectedAt(null);
+      setReconnectAttempts(0);
       setLastRefreshAt(null);
       setLastEventLabel(null);
     });
+  }
+
+  const toggleExpand = useCallback((orderId: string) => {
+    setExpandedOrderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) {
+        next.delete(orderId);
+      } else {
+        next.add(orderId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Keyboard shortcuts for expanded order
+  useEffect(() => {
+    if (!session || expandedOrderIds.size !== 1) return;
+
+    const expandedId = [...expandedOrderIds][0];
+    const expandedOrder = board?.orders.find(o => o.id === expandedId);
+    if (!expandedOrder) return;
+
+    const actions = (STATUS_ACTIONS[expandedOrder.status] ?? []);
+    const keyMap: Record<string, string> = {};
+    actions.forEach((status, i) => {
+      keyMap[String(i + 1)] = status;
+    });
+
+    function handleKeyDown(e: KeyboardEvent) {
+      // Ignore if user is typing in an input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+
+      if (e.key === "Escape") {
+        setExpandedOrderIds(new Set());
+        return;
+      }
+
+      const action = keyMap[e.key];
+      if (action) {
+        e.preventDefault();
+        setConfirmDialog({
+          orderId: expandedId,
+          orderNumber: expandedOrder!.orderNumber,
+          nextStatus: action
+        });
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [session, expandedOrderIds, board?.orders]);
+
+  async function handleConfirmAction() {
+    if (!confirmDialog) {
+      return;
+    }
+    const { orderId, nextStatus } = confirmDialog;
+    setConfirmDialog(null);
+    await handleStatusUpdate(orderId, nextStatus);
   }
 
   if (isBootstrapping) {
@@ -294,6 +420,15 @@ export default function StaffHomePage() {
 
   return (
     <main style={styles.shell}>
+      {confirmDialog ? (
+        <ConfirmDialog
+          dialog={confirmDialog}
+          isPending={isPending}
+          onConfirm={() => void handleConfirmAction()}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      ) : null}
+
       <section style={styles.topBar}>
         <div style={styles.headerBrand}>
           <div style={styles.brandLogoFrame}>
@@ -311,24 +446,25 @@ export default function StaffHomePage() {
               <span style={styles.infoPill}>
                 {session.user.roles.length ? session.user.roles.join(" / ") : "staff"}
               </span>
-              <span
-                style={{
-                  ...styles.connectionChip,
-                  ...(isRealtimeConnected ? styles.connectionChipLive : styles.connectionChipOffline)
-                }}
-              >
-                {isRealtimeConnected ? "Realtime connected" : "Realtime reconnecting"}
-              </span>
+              <ConnectionStatusIndicator
+                status={socketStatus}
+                disconnectedAt={disconnectedAt}
+                reconnectAttempts={reconnectAttempts}
+              />
               <span style={styles.infoPill}>
-                {lastRefreshAt ? `Last refresh ${getElapsedLabel(lastRefreshAt)}` : "Waiting for first refresh"}
+                {lastRefreshAt ? `Last refresh ${getElapsedLabel(lastRefreshAt, now)}` : "Waiting for first refresh"}
               </span>
+              <SoundToggle
+                enabled={soundEnabled}
+                onToggle={() => setSoundEnabled(prev => !prev)}
+              />
             </div>
           </div>
         </div>
         <div style={styles.topBarActions}>
           <button
             style={styles.secondaryButton}
-            onClick={() => void loadBoardWithSession(session, scope, statusFilter, "Manual refresh")}
+            onClick={() => void loadBoardWithSession(session, scope, statusFilter, kindFilter, "Manual refresh")}
             disabled={isPending}
           >
             Refresh board
@@ -361,6 +497,20 @@ export default function StaffHomePage() {
               onChange={event => setStatusFilter(event.target.value)}
             >
               {STATUS_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={styles.labelInline}>
+            Type
+            <select
+              style={styles.select}
+              value={kindFilter}
+              onChange={event => setKindFilter(event.target.value)}
+            >
+              {KIND_OPTIONS.map(option => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -407,13 +557,22 @@ export default function StaffHomePage() {
                       order={order}
                       note={noteByOrderId[order.id] || ""}
                       isPending={isPending}
+                      isExpanded={expandedOrderIds.has(order.id)}
+                      now={now}
                       onNoteChange={value =>
                         setNoteByOrderId(current => ({
                           ...current,
                           [order.id]: value
                         }))
                       }
-                      onAction={nextStatus => void handleStatusUpdate(order.id, nextStatus)}
+                      onAction={nextStatus =>
+                        setConfirmDialog({
+                          orderId: order.id,
+                          orderNumber: order.orderNumber,
+                          nextStatus
+                        })
+                      }
+                      onToggleExpand={() => toggleExpand(order.id)}
                     />
                   ))}
                 </div>

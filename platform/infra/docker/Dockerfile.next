@@ -32,9 +32,15 @@ ARG APP_NAME
 ENV NODE_ENV=production
 ENV PORT=3000
 
+RUN groupadd --gid 1001 appgroup && useradd --uid 1001 --gid appgroup --shell /bin/sh appuser
+
 COPY --from=build /app/apps/${APP_NAME}/.next/standalone ./
 COPY --from=build /app/apps/${APP_NAME}/.next/static ./apps/${APP_NAME}/.next/static
 COPY --from=build /app/apps/${APP_NAME}/public ./apps/${APP_NAME}/public
+
+RUN chown -R appuser:appgroup /app
+
+USER appuser
 
 WORKDIR /app/apps/${APP_NAME}
 EXPOSE 3000

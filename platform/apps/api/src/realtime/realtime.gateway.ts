@@ -8,18 +8,19 @@ import {
 import type { Server, Socket } from "socket.io";
 import { ConfigService } from "@nestjs/config";
 
-const jwt: {
-  verify: (token: string, secret: string) => unknown;
-} = require("jsonwebtoken");
+import jwt from "jsonwebtoken";
 
 @WebSocketGateway({
   cors: {
     origin:
       process.env.NODE_ENV === "production"
-        ? (process.env.ALLOWED_ORIGINS || "")
-            .split(",")
-            .map(o => o.trim())
-            .filter(Boolean)
+        ? (() => {
+            const origins = (process.env.ALLOWED_ORIGINS || "")
+              .split(",")
+              .map(o => o.trim())
+              .filter(Boolean);
+            return origins.length ? origins : [];
+          })()
         : true,
     credentials: true
   }

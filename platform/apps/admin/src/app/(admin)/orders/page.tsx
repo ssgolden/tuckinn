@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { apiFetch, withAdminSession } from "@/lib/api";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -12,14 +12,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -27,8 +33,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ClipboardList, ArrowRight } from "lucide-react";
+import {
+  ClipboardList,
+  Search,
+  Clock,
+  Package,
+  ArrowRight,
+  ArrowLeft,
+  Inbox,
+  RefreshCw,
+  User,
+  AlertTriangle,
+} from "lucide-react";
 import { toast } from "sonner";
+import { EmptyState } from "@/components/empty-state";
 
 type OrderItem = { name: string; quantity: number; unitPrice: number };
 
@@ -45,167 +63,415 @@ type Order = {
   table?: { name?: string; tableNumber: number };
 };
 
+type StatusTab = "all" | "pending_payment" | "paid" | "preparing" | "ready" | "completed" | "cancelled";
+
+const STATUS_TABS: { value: StatusTab; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "pending_payment", label: "Pending" },
+  { value: "paid", label: "Paid" },
+  { value: "preparing", label: "Preparing" },
+  { value: "ready", label: "Ready" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
 const STATUS_COLORS: Record<string, string> = {
-  pending_payment: "bg-yellow-100 text-yellow-800",
-  paid: "bg-blue-100 text-blue-800",
-  accepted: "bg-indigo-100 text-indigo-800",
-  preparing: "bg-orange-100 text-orange-800",
-  ready: "bg-green-100 text-green-800",
-  completed: "bg-stone-100 text-stone-600",
-  cancelled: "bg-red-100 text-red-800",
-  refunded: "bg-purple-100 text-purple-800",
+  pending_payment: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  paid: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  accepted: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30",
+  preparing: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  ready: "bg-green-500/20 text-green-400 border-green-500/30",
+  completed: "bg-stone-500/20 text-stone-400 border-stone-500/30",
+  cancelled: "bg-red-500/20 text-red-400 border-red-500/30",
+  refunded: "bg-purple-500/20 text-purple-400 border-purple-500/30",
 };
 
-const NEXT_STATUS: Record<string, string> = {
-  pending_payment: "paid",
-  paid: "accepted",
-  accepted: "preparing",
-  preparing: "ready",
-  ready: "completed",
+const NEXT_STATUS: Record<string, { status: string; label: string }> = {
+  pending_payment: { status: "paid", label: "Accept Payment" },
+  paid: { status: "accepted", label: "Accept Order" },
+  accepted: { status: "preparing", label: "Start Preparing" },
+  preparing: { status: "ready", label: "Mark Ready" },
+  ready: { status: "completed", label: "Complete" },
 };
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${mins % 60}m ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function formatPrice(amount: number) {
+  return `€${Number(amount).toFixed(2)}`;
+}
 
 export default function OrdersPage() {
-  const { session } = useAuth();
+  const { session, updateSession } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scope, setScope] = useState<"active" | "history" | "all">("active");
+  const [activeTab, setActiveTab] = useState<StatusTab>("all");
+  const [search, setSearch] = useState("");
+  const [dateRange, setDateRange] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [page, setPage] = useState(1);
+  const ordersPerPage = 25;
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [advancing, setAdvancing] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadOrders = useCallback(async () => {
     if (!session) return;
-    setLoading(true);
-    setError(null);
     try {
       const data = await apiFetch<Order[]>(
-        `/orders?locationCode=main&scope=${scope}`,
+        `/orders?limit=50`,
         undefined,
         session.accessToken
       );
       setOrders(data);
+      setError(null);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to load orders";
       setError(msg);
-      setOrders([]);
     } finally {
       setLoading(false);
     }
-  }, [session, scope]);
+  }, [session]);
 
-  useEffect(() => { loadOrders(); }, [loadOrders]);
+  // Initial load + auto-refresh every 30s
+  useEffect(() => {
+    loadOrders();
+    pollRef.current = setInterval(loadOrders, 30_000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [loadOrders]);
 
   async function advanceOrder(orderId: string, currentStatus: string) {
     if (!session) return;
     const next = NEXT_STATUS[currentStatus];
     if (!next) return;
+    setAdvancing(orderId);
     try {
       await withAdminSession(session, (token) =>
         apiFetch(`/fulfillment/orders/${orderId}/status`, {
           method: "PATCH",
-          body: JSON.stringify({ status: next }),
-        }, token), () => {}
+          body: JSON.stringify({ status: next.status }),
+        }, token), updateSession
       );
-      toast.success(`Order moved to ${next.replace(/_/g, " ")}`);
-      loadOrders();
+      toast.success(`Order moved to ${next.status.replace(/_/g, " ")}`);
+      await loadOrders();
+      setSelectedOrder((prev) =>
+        prev && prev.id === orderId ? { ...prev, status: next.status } : prev
+      );
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Status update failed");
+    } finally {
+      setAdvancing(null);
     }
   }
 
-  function formatPrice(amount: number) {
-    return `€${Number(amount).toFixed(2)}`;
-  }
+  const filteredOrders = orders.filter((o) => {
+    if (activeTab !== "all" && o.status !== activeTab) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const matchNumber = o.orderNumber.toLowerCase().includes(q);
+      const matchCustomer = (o.customerName || "").toLowerCase().includes(q);
+      if (!matchNumber && !matchCustomer) return false;
+    }
+    if (dateRange !== "all") {
+      const orderDate = new Date(o.createdAt);
+      const now = new Date();
+      if (dateRange === "today") {
+        if (orderDate.toDateString() !== now.toDateString()) return false;
+      } else if (dateRange === "7d") {
+        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        if (orderDate < sevenDaysAgo) return false;
+      } else if (dateRange === "30d") {
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        if (orderDate < thirtyDaysAgo) return false;
+      }
+    }
+    return true;
+  });
 
-  function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [activeTab, search, dateRange]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ordersPerPage));
+  const paginatedOrders = filteredOrders.slice((page - 1) * ordersPerPage, page * ordersPerPage);
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
-          <p className="text-muted-foreground">View and manage all orders, update fulfillment status.</p>
+          <p className="text-muted-foreground">View and manage orders, update fulfillment status.</p>
         </div>
-        <Select value={scope} onValueChange={(v) => setScope(v as "active" | "history" | "all")}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="history">History</SelectItem>
-            <SelectItem value="all">All</SelectItem>
-          </SelectContent>
-        </Select>
+        <Button variant="outline" size="sm" onClick={loadOrders} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
+      {/* Error */}
       {error && (
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="pt-4 text-sm text-red-800">
+        <Card className="border-destructive/30 bg-destructive/10">
+          <CardContent className="pt-4 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4 inline mr-1.5 align-text-bottom" />
             Failed to load orders: {error}
           </CardContent>
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ClipboardList className="h-5 w-5" />
-            {scope === "active" ? "Active" : scope === "history" ? "Completed" : "All"} Orders ({orders.length})
-          </CardTitle>
-          <CardDescription>Click advance to move orders through the fulfillment pipeline.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Order #</TableHead>
-                <TableHead>Time</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Table</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Advance</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
-              ) : orders.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No {scope} orders found.</TableCell></TableRow>
+      {/* Tabs + Search */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by order # or customer..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 bg-[#111] border-border/50"
+            />
+          </div>
+          <Select value={dateRange} onValueChange={(v) => setDateRange(v as "all" | "today" | "7d" | "30d")}>
+            <SelectTrigger className="min-w-[130px] bg-[#111] border-border/50">
+              <SelectValue placeholder="Date range" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="7d">Last 7 days</SelectItem>
+              <SelectItem value="30d">Last 30 days</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as StatusTab)}>
+          <TabsList>
+            {STATUS_TABS.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>
+                {tab.label}
+                <span className="ml-1.5 text-xs text-muted-foreground">
+                  {tab.value === "all"
+                    ? orders.length
+                    : orders.filter((o) => o.status === tab.value).length}
+                </span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+
+          {/* All tabs share the same content rendering */}
+          {STATUS_TABS.map((tab) => (
+            <TabsContent key={tab.value} value={tab.value}>
+              {loading && filteredOrders.length === 0 ? (
+                <div className="flex items-center justify-center py-16 text-muted-foreground" role="status" aria-live="polite">
+                  <RefreshCw className="h-5 w-5 animate-spin mr-2" />
+                  Loading orders...
+                </div>
+              ) : filteredOrders.length === 0 ? (
+                <EmptyState
+                  icon={Inbox}
+                  title="No orders found"
+                  description={search
+                    ? "Try adjusting your search query."
+                    : `No ${tab.value === "all" ? "" : tab.label.toLowerCase() + " "}orders to display.`}
+                />
               ) : (
-                orders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="font-mono font-medium">{order.orderNumber}</TableCell>
-                    <TableCell className="text-sm">{formatTime(order.createdAt)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">{order.orderKind}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">{order.table?.name || order.table?.tableNumber || "—"}</TableCell>
-                    <TableCell className="text-sm max-w-[200px] truncate">{order.items?.map((i) => `${i.quantity}× ${i.name}`).join(", ") || "—"}</TableCell>
-                    <TableCell className="font-medium">{formatPrice(order.totalAmount)}</TableCell>
-                    <TableCell>
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[order.status] || "bg-stone-100 text-stone-600"}`}>
-                        {order.status.replace(/_/g, " ")}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {NEXT_STATUS[order.status] ? (
-                        <Button variant="outline" size="sm" onClick={() => advanceOrder(order.id, order.status)}>
-                          <ArrowRight className="h-3.5 w-3.5 mr-1" />
-                          {NEXT_STATUS[order.status].replace(/_/g, " ")}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Done</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {paginatedOrders.map((order) => {
+                    const next = NEXT_STATUS[order.status];
+                    return (
+                      <Card
+                        key={order.id}
+                        className="cursor-pointer bg-[#111] border-border/40 hover:border-border transition-colors"
+                        onClick={() => setSelectedOrder(order)}
+                      >
+                        <CardContent className="pt-4 space-y-3">
+                          {/* Order header */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-semibold text-sm">
+                                  #{order.orderNumber}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                    STATUS_COLORS[order.status] || "bg-stone-500/20 text-stone-400 border-stone-500/30"
+                                  }`}
+                                >
+                                  {order.status.replace(/_/g, " ")}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Clock className="h-3 w-3" />
+                                {timeAgo(order.createdAt)}
+                              </div>
+                            </div>
+                            <span className="text-lg font-bold">
+                              {formatPrice(order.totalAmount)}
+                            </span>
+                          </div>
+
+                          {/* Customer & items */}
+                          <div className="flex items-center gap-4 text-sm">
+                            {order.customerName && (
+                              <div className="flex items-center gap-1 text-muted-foreground">
+                                <User className="h-3 w-3" />
+                                {order.customerName}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1 text-muted-foreground">
+                              <Package className="h-3 w-3" />
+                              {order.items?.length || 0} item{(order.items?.length || 0) !== 1 ? "s" : ""}
+                            </div>
+                            {order.table && (
+                              <span className="text-xs text-muted-foreground">
+                                Table {order.table.name || order.table.tableNumber}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Action */}
+                          {next && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="w-full text-xs h-8"
+                              disabled={advancing === order.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                advanceOrder(order.id, order.status);
+                              }}
+                            >
+                              {advancing === order.id ? (
+                                <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <ArrowRight className="h-3 w-3 mr-1" />
+                              )}
+                              {next.label}
+                            </Button>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
               )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </TabsContent>
+          ))}
+        </Tabs>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-sm text-muted-foreground">
+              Page {page} of {totalPages} · {filteredOrders.length} order{filteredOrders.length !== 1 ? "s" : ""}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage(p => p - 1)}
+              >
+                <ArrowLeft className="h-4 w-4 mr-1" /> Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage(p => p + 1)}
+              >
+                Next <ArrowRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Order detail dialog */}
+      <Dialog open={!!selectedOrder} onOpenChange={(open) => !open && setSelectedOrder(null)}>
+        <DialogContent className="bg-[#111] border-border/50 max-w-md" aria-modal="true">
+          {selectedOrder && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <ClipboardList className="h-5 w-5" />
+                  Order #{selectedOrder.orderNumber}
+                </DialogTitle>
+                <DialogDescription>
+                  {new Date(selectedOrder.createdAt).toLocaleString()} &middot; {selectedOrder.orderKind}
+                  {selectedOrder.table && ` \u00B7 Table ${selectedOrder.table.name || selectedOrder.table.tableNumber}`}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 pt-2">
+                {/* Status badge */}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Status</span>
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                      STATUS_COLORS[selectedOrder.status] || "bg-stone-500/20 text-stone-400 border-stone-500/30"
+                    }`}
+                  >
+                    {selectedOrder.status.replace(/_/g, " ")}
+                  </span>
+                </div>
+
+                {/* Customer */}
+                {selectedOrder.customerName && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Customer</span>
+                    <span className="text-sm font-medium">{selectedOrder.customerName}</span>
+                  </div>
+                )}
+
+                {/* Items */}
+                <div className="space-y-1.5">
+                  <span className="text-sm font-medium">Items</span>
+                  {selectedOrder.items?.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        {item.quantity}x {item.name}
+                      </span>
+                      <span>{formatPrice(item.quantity * item.unitPrice)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Total */}
+                <div className="flex items-center justify-between border-t border-border/50 pt-2">
+                  <span className="text-sm font-semibold">Total</span>
+                  <span className="text-lg font-bold">{formatPrice(selectedOrder.totalAmount)}</span>
+                </div>
+
+                {/* Advance status button */}
+                {NEXT_STATUS[selectedOrder.status] && (
+                  <Button
+                    className="w-full"
+                    disabled={advancing === selectedOrder.id}
+                    onClick={() => advanceOrder(selectedOrder.id, selectedOrder.status)}
+                  >
+                    {advancing === selectedOrder.id ? (
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <ArrowRight className="h-4 w-4 mr-2" />
+                    )}
+                    {NEXT_STATUS[selectedOrder.status].label}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

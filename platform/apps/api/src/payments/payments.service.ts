@@ -12,14 +12,14 @@ import {
   OrderStatus,
   CartStatus
 } from "../../src/generated/prisma/index.js";
+import { fromMinorUnits, toDisplayAmount } from "../common/money.utils";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
-const stripeFactory: (key: string, config?: Record<string, unknown>) => any =
-  require("stripe");
+import Stripe from "stripe";
 
 @Injectable()
 export class PaymentsService {
-  private readonly stripe: any;
+  private readonly stripe: InstanceType<typeof Stripe> | null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -29,7 +29,7 @@ export class PaymentsService {
     const stripeSecretKey = this.configService.get<string>("STRIPE_SECRET_KEY");
     this.stripe =
       stripeSecretKey && stripeSecretKey !== "replace-me"
-        ? stripeFactory(stripeSecretKey)
+        ? new Stripe(stripeSecretKey)
         : null;
   }
 
@@ -138,6 +138,31 @@ export class PaymentsService {
     }
   }
 
+  async getPaymentsForOrder(orderId: string) {
+    const payments = await this.prisma.payment.findMany({
+      where: { orderId },
+      orderBy: [{ createdAt: "desc" }]
+    });
+
+    return payments.map(payment => ({
+      id: payment.id,
+      provider: payment.provider,
+      status: payment.status,
+      currencyCode: payment.currencyCode,
+      providerIntentId: payment.providerIntentId,
+      amountAuthorized: payment.amountAuthorized
+        ? toDisplayAmount(payment.amountAuthorized)
+        : null,
+      amountCaptured: payment.amountCaptured
+        ? toDisplayAmount(payment.amountCaptured)
+        : null,
+      amountRefunded: toDisplayAmount(payment.amountRefunded),
+      failureCode: payment.failureCode,
+      failureMessage: payment.failureMessage,
+      createdAt: payment.createdAt
+    }));
+  }
+
   async getCheckoutStateByIdempotencyKey(idempotencyKey: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { idempotencyKey },
@@ -228,12 +253,12 @@ export class PaymentsService {
             ? String(paymentIntent.latest_charge)
             : null,
           status: this.mapStripeStatus(paymentIntent.status),
-          amountAuthorized: this.fromMinorUnits(paymentIntent.amount),
+          amountAuthorized: fromMinorUnits(paymentIntent.amount),
           amountCaptured:
             paymentIntent.status === "succeeded"
-              ? this.fromMinorUnits(paymentIntent.amount_received)
+              ? fromMinorUnits(paymentIntent.amount_received)
               : null,
-          metadata: paymentIntent
+          metadata: JSON.parse(JSON.stringify(paymentIntent))
         }
       });
 
@@ -243,7 +268,7 @@ export class PaymentsService {
           provider: PaymentProvider.stripe,
           eventType: `payment_intent.${paymentIntent.status}`,
           providerEventId: paymentIntent.id,
-          payload: paymentIntent,
+          payload: JSON.parse(JSON.stringify(paymentIntent)),
           processedAt: new Date()
         }
       });
@@ -304,7 +329,7 @@ export class PaymentsService {
     }
 
     const mockIntentId = `mock_pi_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
-    const amountDisplay = this.fromMinorUnits(input.amountMinor);
+    const amountDisplay = fromMinorUnits(input.amountMinor);
     const paymentMetadata = {
       mode: "mock",
       provider: "stripe",
@@ -448,7 +473,7 @@ export class PaymentsService {
         data: {
           providerIntentId: session.id,
           status: PaymentStatus.pending,
-          amountAuthorized: this.fromMinorUnits(input.amountMinor),
+          amountAuthorized: fromMinorUnits(input.amountMinor),
           metadata: { checkoutSessionId: session.id, checkoutUrl: session.url }
         }
       });
@@ -490,7 +515,7 @@ export class PaymentsService {
       data: {
         providerPaymentId: session.payment_intent,
         status: PaymentStatus.paid,
-        amountCaptured: this.fromMinorUnits(session.amount_total)
+        amountCaptured: fromMinorUnits(session.amount_total)
       }
     });
 
@@ -620,15 +645,15 @@ export class PaymentsService {
           status: paymentStatus,
           amountAuthorized:
             typeof paymentIntent.amount === "number"
-              ? this.fromMinorUnits(paymentIntent.amount)
+              ? fromMinorUnits(paymentIntent.amount)
               : payment.amountAuthorized,
           amountCaptured:
             typeof paymentIntent.amount_received === "number"
-              ? this.fromMinorUnits(paymentIntent.amount_received)
+              ? fromMinorUnits(paymentIntent.amount_received)
               : payment.amountCaptured,
           failureCode: paymentIntent.last_payment_error?.code ?? null,
           failureMessage: paymentIntent.last_payment_error?.message ?? null,
-          metadata: paymentIntent
+          metadata: JSON.parse(JSON.stringify(paymentIntent))
         }
       });
 
@@ -638,7 +663,7 @@ export class PaymentsService {
           provider: PaymentProvider.stripe,
           eventType,
           providerEventId,
-          payload: paymentIntent,
+          payload: JSON.parse(JSON.stringify(paymentIntent)),
           processedAt: new Date()
         }
       });
@@ -731,19 +756,19 @@ export class PaymentsService {
         customerName: payment.order.customerName,
         customerEmail: payment.order.customerEmail,
         customerPhone: payment.order.customerPhone,
-        totalAmount: this.toDisplayAmount(payment.order.totalAmount),
+        totalAmount: toDisplayAmount(payment.order.totalAmount),
         items: payment.order.items.map(item => ({
           id: item.id,
           quantity: item.quantity,
           itemName: item.itemName,
           notes: item.notes,
-          unitPriceAmount: this.toDisplayAmount(item.unitPriceAmount),
-          lineTotalAmount: this.toDisplayAmount(item.lineTotalAmount),
+          unitPriceAmount: toDisplayAmount(item.unitPriceAmount),
+          lineTotalAmount: toDisplayAmount(item.lineTotalAmount),
           modifiers: item.modifiers.map(modifier => ({
             id: modifier.id,
             modifierGroupName: modifier.modifierGroupName,
             modifierOptionName: modifier.modifierOptionName,
-            priceDeltaAmount: this.toDisplayAmount(modifier.priceDeltaAmount)
+            priceDeltaAmount: toDisplayAmount(modifier.priceDeltaAmount)
           }))
         }))
       },
@@ -754,10 +779,10 @@ export class PaymentsService {
         currencyCode: payment.currencyCode,
         providerIntentId: payment.providerIntentId,
         amountAuthorized: payment.amountAuthorized
-          ? this.toDisplayAmount(payment.amountAuthorized)
+          ? toDisplayAmount(payment.amountAuthorized)
           : null,
         amountCaptured: payment.amountCaptured
-          ? this.toDisplayAmount(payment.amountCaptured)
+          ? toDisplayAmount(payment.amountCaptured)
           : null,
         failureMessage: payment.failureMessage
       }
@@ -801,11 +826,4 @@ export class PaymentsService {
     }
   }
 
-  private fromMinorUnits(value: number): string {
-    return (value / 100).toFixed(2);
-  }
-
-  private toDisplayAmount(value: unknown): number {
-    return Number(Number(value ?? 0).toFixed(2));
-  }
 }

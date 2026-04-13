@@ -20,7 +20,7 @@ const server = http.createServer(app);
 const isProduction = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT || 3005);
 const DB_PATH = path.join(__dirname, 'database.sqlite');
-const STATIC_ROOT = path.join(__dirname, '.');
+const STATIC_ROOT = path.join(__dirname, 'public');
 const SESSION_COOKIE_NAME = 'tuckinn_staff';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'development-session-secret-change-me';
 const STAFF_PIN = String(process.env.STAFF_PIN || '1234');
@@ -101,11 +101,12 @@ app.use('/api', apiLimiter);
 
 io.engine.use(sessionMiddleware);
 io.use((socket, next) => {
-    if (socket.request.session && socket.request.session.staffAuthenticated) {
-        return next();
-    }
-    return next(new Error('Unauthorized'));
+    next();
 });
+
+function requireStaffSocket(socket) {
+    return socket.request.session && socket.request.session.staffAuthenticated;
+}
 
 let db;
 
@@ -366,10 +367,18 @@ function buildMenuResponse() {
 }
 
 function parseOrderRow(row) {
+    let parsedItems;
+    try {
+        parsedItems = JSON.parse(row.items || '[]');
+    } catch (error) {
+        console.error('Failed to parse order items:', error.message);
+        parsedItems = [];
+    }
+
     return {
         id: Number(row.id),
         order_number: sanitizeText(row.order_number, { max: 40 }),
-        items: JSON.parse(row.items || '[]').map(item => ({
+        items: parsedItems.map(item => ({
             ...item,
             name: sanitizeText(item.name, { max: 120 }),
             desc: sanitizeText(item.desc, { max: 280 }),
@@ -399,10 +408,16 @@ function calculateOrderTotal(items) {
 
 function generateOrderNumber() {
     let candidate = '';
+    let attempts = 0;
+    const MAX_ATTEMPTS = 10;
 
     do {
         const suffix = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
         candidate = `TK${suffix}`;
+        attempts++;
+        if (attempts >= MAX_ATTEMPTS) {
+            throw new Error('Failed to generate a unique order number after ' + MAX_ATTEMPTS + ' attempts.');
+        }
     } while (queryOne('SELECT id FROM orders WHERE order_number = ?', [candidate]));
 
     return candidate;
@@ -501,7 +516,11 @@ async function initDB() {
     db.run(`CREATE TABLE IF NOT EXISTS promo_codes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         code TEXT UNIQUE,
-        discount INTEGER
+        discount INTEGER,
+        active INTEGER DEFAULT 1,
+        expires_at DATETIME,
+        max_uses INTEGER,
+        used_count INTEGER DEFAULT 0
     )`);
 
     db.run(`CREATE TABLE IF NOT EXISTS customers (
@@ -521,6 +540,10 @@ async function initDB() {
     try { db.run('ALTER TABLE customers ADD COLUMN password_hash TEXT'); } catch (error) {}
     try { db.run('ALTER TABLE orders ADD COLUMN table_number INTEGER'); } catch (error) {}
     try { db.run('ALTER TABLE orders ADD COLUMN num_people INTEGER DEFAULT 1'); } catch (error) {}
+    try { db.run('ALTER TABLE promo_codes ADD COLUMN active INTEGER DEFAULT 1'); } catch (error) {}
+    try { db.run('ALTER TABLE promo_codes ADD COLUMN expires_at DATETIME'); } catch (error) {}
+    try { db.run('ALTER TABLE promo_codes ADD COLUMN max_uses INTEGER'); } catch (error) {}
+    try { db.run('ALTER TABLE promo_codes ADD COLUMN used_count INTEGER DEFAULT 0'); } catch (error) {}
 
     const menuCount = queryOne('SELECT COUNT(*) AS count FROM menu_config');
     if (!menuCount || Number(menuCount.count) === 0) {
@@ -713,6 +736,39 @@ app.post('/api/orders', orderLimiter, (req, res) => {
     const localDate = getLocalDateTimeString();
     const { customerName, phone, orderType, specialInstructions, tableNumber, numPeople, items, total } = validation.value;
 
+    let finalTotal = total;
+    let appliedPromo = null;
+
+    const promoCode = sanitizeText(req.body.promoCode, { max: 40, allowEmpty: false });
+    if (promoCode) {
+        const promo = queryOne('SELECT * FROM promo_codes WHERE code = ? AND active = 1', [promoCode.toUpperCase()]);
+
+        if (!promo) {
+            return res.status(400).json({ error: 'Invalid or inactive promo code.' });
+        }
+
+        if (promo.expires_at) {
+            const expiresAt = new Date(promo.expires_at + 'Z');
+            if (expiresAt < new Date()) {
+                return res.status(400).json({ error: 'Promo code has expired.' });
+            }
+        }
+
+        if (promo.max_uses != null && Number(promo.used_count) >= Number(promo.max_uses)) {
+            return res.status(400).json({ error: 'Promo code has reached its usage limit.' });
+        }
+
+        const discount = Math.min(Number(promo.discount), 100);
+        finalTotal = Math.round(finalTotal * (1 - discount / 100) * 100) / 100;
+
+        if (finalTotal < 0) {
+            finalTotal = 0;
+        }
+
+        appliedPromo = { code: promo.code, discount };
+        runSql('UPDATE promo_codes SET used_count = used_count + 1 WHERE id = ?', [promo.id]);
+    }
+
     runSql(
         `INSERT INTO orders (
             order_number, items, total, status, customer_name, phone, order_type, special_instructions, table_number, num_people, date
@@ -720,7 +776,7 @@ app.post('/api/orders', orderLimiter, (req, res) => {
         [
             orderNumber,
             JSON.stringify(items),
-            total,
+            finalTotal,
             'new',
             customerName,
             phone,
@@ -736,7 +792,7 @@ app.post('/api/orders', orderLimiter, (req, res) => {
     const order = parseOrderRow(orderRow);
 
     io.to('staff_room').emit('new_order', order);
-    return res.status(201).json({ success: true, order });
+    return res.status(201).json({ success: true, order, promo: appliedPromo });
 });
 
 app.get('/api/orders', requireStaff, (req, res) => {
@@ -802,12 +858,26 @@ app.get('/api/qr/:table', requireStaff, async (req, res) => {
     }
 });
 
+// Block access to sensitive files
+app.use((req, res, next) => {
+    const sensitive = ['.env', '.git', 'database.sqlite', 'server_sqljs.js', 'package.json', 'package-lock.json'];
+    if (sensitive.some(f => req.path.includes(f))) {
+        return res.status(404).send('Not found');
+    }
+    next();
+});
+
 app.use(express.static(STATIC_ROOT));
 
 io.on('connection', socket => {
-    socket.join('staff_room');
+    if (requireStaffSocket(socket)) {
+        socket.join('staff_room');
+    }
 
     socket.on('send_message', data => {
+        if (!requireStaffSocket(socket)) {
+            return;
+        }
         io.to('staff_room').emit('receive_message', {
             sender: sanitizeText(data && data.sender, { max: 60 }) || 'Staff',
             text: sanitizeText(data && data.text, { max: 280 }) || '',

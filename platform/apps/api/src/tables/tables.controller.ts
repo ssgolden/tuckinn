@@ -9,6 +9,7 @@ import {
   Body,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { RoleCode } from "../../src/generated/prisma/index.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../rbac/roles.decorator";
@@ -22,6 +23,7 @@ export class TablesController {
   constructor(private readonly tablesService: TablesService) {}
 
   @Get("public/:qrSlug")
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   getPublicTable(@Param("qrSlug") qrSlug: string) {
     return this.tablesService.getPublicTable(qrSlug);
   }

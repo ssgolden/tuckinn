@@ -4,6 +4,7 @@ import {
   NotFoundException
 } from "@nestjs/common";
 import { OrderStatus, OrderType } from "../../src/generated/prisma/index.js";
+import { toDisplayAmount } from "../common/money.utils";
 import { PrismaService } from "../prisma/prisma.service";
 
 type OrderScope = "active" | "history" | "all";
@@ -141,10 +142,10 @@ export class OrdersService {
       customerPhone: order.customerPhone,
       specialInstructions: order.specialInstructions,
       deliveryAddress: this.getDeliveryAddress(order.metadata),
-      subtotalAmount: this.toDisplayAmount(order.subtotalAmount),
-      discountAmount: this.toDisplayAmount(order.discountAmount),
-      taxAmount: this.toDisplayAmount(order.taxAmount),
-      totalAmount: this.toDisplayAmount(order.totalAmount),
+      subtotalAmount: toDisplayAmount(order.subtotalAmount),
+      discountAmount: toDisplayAmount(order.discountAmount),
+      taxAmount: toDisplayAmount(order.taxAmount),
+      totalAmount: toDisplayAmount(order.totalAmount),
       createdAt: order.createdAt,
       acceptedAt: order.acceptedAt,
       preparingAt: order.preparingAt,
@@ -170,13 +171,13 @@ export class OrdersService {
         quantity: item.quantity,
         itemName: item.itemName,
         notes: item.notes,
-        unitPriceAmount: this.toDisplayAmount(item.unitPriceAmount),
-        lineTotalAmount: this.toDisplayAmount(item.lineTotalAmount),
+        unitPriceAmount: toDisplayAmount(item.unitPriceAmount),
+        lineTotalAmount: toDisplayAmount(item.lineTotalAmount),
         modifiers: item.modifiers.map((modifier: any) => ({
           id: modifier.id,
           modifierGroupName: modifier.modifierGroupName,
           modifierOptionName: modifier.modifierOptionName,
-          priceDeltaAmount: this.toDisplayAmount(modifier.priceDeltaAmount)
+          priceDeltaAmount: toDisplayAmount(modifier.priceDeltaAmount)
         })),
         snapshot: item.snapshot
       })),
@@ -187,21 +188,17 @@ export class OrdersService {
         currencyCode: payment.currencyCode,
         providerIntentId: payment.providerIntentId,
         amountAuthorized: payment.amountAuthorized
-          ? this.toDisplayAmount(payment.amountAuthorized)
+          ? toDisplayAmount(payment.amountAuthorized)
           : null,
         amountCaptured: payment.amountCaptured
-          ? this.toDisplayAmount(payment.amountCaptured)
+          ? toDisplayAmount(payment.amountCaptured)
           : null,
-        amountRefunded: this.toDisplayAmount(payment.amountRefunded),
+        amountRefunded: toDisplayAmount(payment.amountRefunded),
         failureCode: payment.failureCode,
         failureMessage: payment.failureMessage,
         createdAt: payment.createdAt
       }))
     };
-  }
-
-  private toDisplayAmount(value: unknown): number {
-    return Number(Number(value ?? 0).toFixed(2));
   }
 
   private getDeliveryAddress(metadata: unknown) {

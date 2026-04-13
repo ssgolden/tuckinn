@@ -4,6 +4,8 @@ export type BoardOrder = {
   status: string;
   orderKind: string;
   customerName: string;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
   specialInstructions?: string | null;
   deliveryAddress?: {
     line1: string;
@@ -136,7 +138,7 @@ export function formatTimestamp(value?: string | null) {
   }).format(date);
 }
 
-export function getElapsedMinutes(value?: string | null) {
+export function getElapsedMinutes(value?: string | null, now?: number) {
   if (!value) {
     return 0;
   }
@@ -146,11 +148,11 @@ export function getElapsedMinutes(value?: string | null) {
     return 0;
   }
 
-  return Math.max(0, Math.floor((Date.now() - createdAt) / 60000));
+  return Math.max(0, Math.floor(((now ?? Date.now()) - createdAt) / 60000));
 }
 
-export function getElapsedLabel(value?: string | null) {
-  const minutes = getElapsedMinutes(value);
+export function getElapsedLabel(value?: string | null, now?: number) {
+  const minutes = getElapsedMinutes(value, now);
 
   if (minutes < 1) {
     return "Just now";
@@ -169,8 +171,8 @@ export function getElapsedLabel(value?: string | null) {
   return `${hours} hr ${remainingMinutes} min ago`;
 }
 
-export function getUrgencyTone(order: BoardOrder) {
-  const minutes = getElapsedMinutes(order.createdAt);
+export function getUrgencyTone(order: BoardOrder, now?: number) {
+  const minutes = getElapsedMinutes(order.createdAt, now);
 
   if ((order.status === "paid" && minutes >= 8) || (order.status === "ready" && minutes >= 10)) {
     return "urgent";
@@ -186,8 +188,8 @@ export function getUrgencyTone(order: BoardOrder) {
   return "normal";
 }
 
-export function getUrgencyLabel(order: BoardOrder) {
-  const tone = getUrgencyTone(order);
+export function getUrgencyLabel(order: BoardOrder, now?: number) {
+  const tone = getUrgencyTone(order, now);
 
   if (tone === "urgent") {
     return "Needs attention";

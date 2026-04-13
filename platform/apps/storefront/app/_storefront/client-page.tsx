@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useState, useTransition, useRef } from "react";
+import { FormEvent, useCallback, useEffect, useState, useTransition, useRef } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import {
@@ -25,14 +25,14 @@ import {
   type StorefrontView
 } from "./catalog";
 import { CategoryStory } from "./category-story";
-import { BasketUpsells } from "./basket-upsells";
+import { BasketUpsells, BasketUpsellsSkeleton } from "./basket-upsells";
 import { BuilderGuide } from "./builder-guide";
 import { storefrontContent, type StorefrontRouteAction } from "./content";
-import { FeaturedGrid } from "./featured-grid";
+import { FeaturedGrid, FeaturedGridSkeleton } from "./featured-grid";
 import { StorefrontHero } from "./hero";
 import { MenuRail } from "./menu-rail";
 import { OrderPaths } from "./order-paths";
-import { ProductCard } from "./product-card";
+import { ProductCard, ProductCardSkeleton } from "./product-card";
 import { SectionShell } from "./section-shell";
 import { SocialProof } from "./social-proof";
 import { TrustStrip } from "./trust-strip";
@@ -72,7 +72,7 @@ export default function StorefrontHomePage() {
     customerName: "",
     customerEmail: "",
     customerPhone: "",
-    orderKind: typeof window !== "undefined" && new URLSearchParams(window.location.search).get("table") ? "instore" : "collect",
+    orderKind: "collect",
     deliveryAddressLine1: "",
     deliveryAddressLine2: "",
     deliveryCity: "",
@@ -88,10 +88,50 @@ export default function StorefrontHomePage() {
   const [authStateTone, setAuthStateTone] = useState<"success" | "error">("success");
   const [isAuthPending, setIsAuthPending] = useState(false);
   const [checkoutState, setCheckoutState] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const validateCheckout = useCallback((form: typeof checkoutForm): Record<string, string> => {
+    const errors: Record<string, string> = {};
+    if (!form.customerName || form.customerName.trim().length < 2) {
+      errors.customerName = "Name must be at least 2 characters";
+    }
+    if (!form.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.customerEmail)) {
+      errors.customerEmail = "Valid email is required";
+    }
+    if (!form.customerPhone || !/^[+\d\s\-()]{7,20}$/.test(form.customerPhone)) {
+      errors.customerPhone = "Valid phone number is required";
+    }
+    if (form.orderKind === "delivery") {
+      if (!form.deliveryAddressLine1.trim()) {
+        errors.deliveryAddressLine1 = "Address line 1 is required";
+      }
+      if (!form.deliveryCity.trim()) {
+        errors.deliveryCity = "City is required";
+      }
+      if (!form.deliveryPostcode.trim()) {
+        errors.deliveryPostcode = "Postcode is required";
+      }
+    }
+    return errors;
+  }, []);
+
+  const isCheckoutValid = Object.keys(fieldErrors).length === 0
+    ? checkoutForm.customerName.trim().length >= 2
+      && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(checkoutForm.customerEmail)
+      && /^[+\d\s\-()]{7,20}$/.test(checkoutForm.customerPhone)
+      && (checkoutForm.orderKind !== "delivery" || (
+        checkoutForm.deliveryAddressLine1.trim()
+        && checkoutForm.deliveryCity.trim()
+        && checkoutForm.deliveryPostcode.trim()
+      ))
+    : false;
+
   const [paymentState, setPaymentState] = useState<"idle" | "paying" | "confirmed" | "failed">("idle");
   const [pendingPayment, setPendingPayment] = useState<{ clientSecret: string; publishableKey: string; orderNumber: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [menuError, setMenuError] = useState<string | null>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [isPendingAction, setIsPendingAction] = useState(false);
   const [lastAddedProductId, setLastAddedProductId] = useState<string | null>(null);
@@ -100,6 +140,8 @@ export default function StorefrontHomePage() {
   const [tableInfo, setTableInfo] = useState<DiningTableResponse | null>(null);
 
   const cartPromiseRef = useRef<Promise<string> | null>(null);
+  const drawerTriggerRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Handle Stripe Checkout redirect back
@@ -120,6 +162,14 @@ export default function StorefrontHomePage() {
     void bootstrap();
   }, []);
 
+  // Set orderKind from URL param after mount to avoid SSR hydration mismatch
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("table")) {
+      setCheckoutForm(current => ({ ...current, orderKind: "instore" }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!lastAddedProductId) return;
     const timer = window.setTimeout(() => setLastAddedProductId(null), 1400);
@@ -131,6 +181,53 @@ export default function StorefrontHomePage() {
     const timer = window.setTimeout(() => setIsBasketPulseActive(false), 700);
     return () => window.clearTimeout(timer);
   }, [isBasketPulseActive]);
+
+  // Focus trap and escape handler for drawer
+  useEffect(() => {
+    if (!isDrawerOpen || !drawerRef.current) return;
+
+    const drawer = drawerRef.current;
+    const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const focusableElements = drawer.querySelectorAll<HTMLElement>(focusableSelector);
+    const firstFocusable = focusableElements[0];
+    const lastFocusable = focusableElements[focusableElements.length - 1];
+
+    if (firstFocusable) {
+      firstFocusable.focus();
+    }
+
+    function handleTabTrap(event: KeyboardEvent) {
+      if (event.key !== "Tab") return;
+      if (focusableElements.length === 0) return;
+
+      if (event.shiftKey) {
+        if (document.activeElement === firstFocusable) {
+          event.preventDefault();
+          lastFocusable.focus();
+        }
+      } else {
+        if (document.activeElement === lastFocusable) {
+          event.preventDefault();
+          firstFocusable.focus();
+        }
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsDrawerOpen(false);
+        drawerTriggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleTabTrap);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleTabTrap);
+      document.removeEventListener("keydown", handleEscape);
+      drawerTriggerRef.current?.focus();
+    };
+  }, [isDrawerOpen]);
 
   const categories = catalog?.categories ?? [];
   const activeCategory =
@@ -220,15 +317,6 @@ export default function StorefrontHomePage() {
       .join(" | ");
   }
 
-  function getProductPrice(product: Product, selection: ProductSelectionState) {
-    const base = product.variants.find(v => v.isDefault)?.priceAmount ?? product.variants[0]?.priceAmount ?? 0;
-    const extra = product.modifierGroups
-      .flatMap(g => g.options)
-      .filter(opt => selection.selectedOptionIds.includes(opt.id))
-      .reduce((sum, opt) => sum + opt.priceDeltaAmount, 0);
-    return base + extra;
-  }
-
   async function bootstrap() {
     try {
       setError(null);
@@ -274,7 +362,9 @@ export default function StorefrontHomePage() {
         setBackOfficeSession(restoredSession);
       }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load the storefront.");
+      const message = loadError instanceof Error ? loadError.message : "Failed to load the storefront.";
+      setError(message);
+      setMenuError(message);
     } finally {
       setIsLoading(false);
     }
@@ -492,6 +582,12 @@ export default function StorefrontHomePage() {
       return;
     }
 
+    const errors = validateCheckout(checkoutForm);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
     setIsPendingAction(true);
     try {
       setError(null);
@@ -517,11 +613,13 @@ export default function StorefrontHomePage() {
           customerEmail: checkoutForm.customerEmail || undefined,
           customerPhone: checkoutForm.customerPhone || undefined,
           specialInstructions: checkoutForm.specialInstructions || undefined,
+          ...(tableSlug ? { diningTableQrSlug: tableSlug } : {}),
           ...(deliveryAddress ? { deliveryAddress } : {})
         })
       });
 
       if (result.payment.checkoutUrl) {
+        setIsRedirecting(true);
         window.location.href = result.payment.checkoutUrl;
       } else if (result.payment.clientSecret && result.payment.publishableKey) {
         setPendingPayment({
@@ -540,18 +638,6 @@ export default function StorefrontHomePage() {
       setError(checkoutError instanceof Error ? checkoutError.message : "Checkout failed.");
     } finally {
       setIsPendingAction(false);
-    }
-  }
-
-  async function handleStripePayment() {
-    if (!pendingPayment) return;
-    setPaymentState("paying");
-    try {
-      const stripe = await loadStripe(pendingPayment.publishableKey);
-      if (!stripe) throw new Error("Failed to initialize Stripe.");
-    } catch (payError) {
-      setPaymentState("failed");
-      setError(payError instanceof Error ? payError.message : "Payment failed.");
     }
   }
 
@@ -579,7 +665,7 @@ function StripePaymentOverlay({
           Total: {formatMoney(cartTotal)}
         </p>
         <Elements stripe={stripePromise} options={{ clientSecret: pendingPayment.clientSecret }}>
-          <StripeCheckoutForm onSuccess={onSuccess} onFailed={onFailed} onCancel={onCancel} />
+          <StripeCheckoutForm clientSecret={pendingPayment.clientSecret} onSuccess={onSuccess} onFailed={onFailed} onCancel={onCancel} />
         </Elements>
       </div>
     </div>
@@ -587,10 +673,12 @@ function StripePaymentOverlay({
 }
 
 function StripeCheckoutForm({
+  clientSecret,
   onSuccess,
   onFailed,
   onCancel
 }: {
+  clientSecret: string;
   onSuccess: () => void;
   onFailed: (msg: string) => void;
   onCancel: () => void;
@@ -612,7 +700,7 @@ function StripeCheckoutForm({
     }
 
     const { error, paymentIntent } = await stripe.confirmCardPayment(
-      (elements as any)._options.clientSecret,
+      clientSecret,
       { payment_method: { card: cardElement } }
     );
 
@@ -659,18 +747,50 @@ function StripeCheckoutForm({
 
   if (isLoading) {
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-        <p>Loading {BRAND_NAME}...</p>
-      </div>
+      <main className="storefront-app" aria-busy="true" aria-label="Loading storefront">
+        <div className="app-header-shell">
+          <header className="app-header">
+            <div className="header-brand">
+              <div className="brand-logo">
+                <div className="skeleton" style={{ width: 56, height: 56, borderRadius: 16 }} aria-hidden="true" />
+              </div>
+              <div className="header-brand-copy">
+                <div className="skeleton" style={{ width: 120, height: 20, marginBottom: 4 }} aria-hidden="true" />
+                <div className="skeleton" style={{ width: 100, height: 12 }} aria-hidden="true" />
+              </div>
+            </div>
+          </header>
+        </div>
+        <section className="home-view" aria-label="Loading content">
+          <div style={{ padding: "0 var(--page-gutter)" }}>
+            <div className="skeleton" style={{ width: "60%", height: 48, marginBottom: 16 }} aria-hidden="true" />
+            <div className="skeleton" style={{ width: "80%", height: 16, marginBottom: 8 }} aria-hidden="true" />
+            <div className="skeleton" style={{ width: "45%", height: 16, marginBottom: 24 }} aria-hidden="true" />
+            <div style={{ display: "flex", gap: 10 }}>
+              <div className="skeleton" style={{ width: 140, height: 48, borderRadius: 50 }} aria-hidden="true" />
+              <div className="skeleton" style={{ width: 160, height: 48, borderRadius: 50 }} aria-hidden="true" />
+            </div>
+          </div>
+          <div style={{ padding: "24px var(--page-gutter)" }}>
+            <div className="skeleton" style={{ width: "40%", height: 14, marginBottom: 8 }} aria-hidden="true" />
+            <div className="skeleton" style={{ width: "55%", height: 22, marginBottom: 16 }} aria-hidden="true" />
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr" }}>
+              <div className="skeleton-card" style={{ height: 120 }} aria-hidden="true" />
+              <div className="skeleton-card" style={{ height: 120 }} aria-hidden="true" />
+              <div className="skeleton-card" style={{ height: 120 }} aria-hidden="true" />
+            </div>
+          </div>
+        </section>
+      </main>
     );
   }
 
   return (
-    <main className="storefront-app">
+    <main className="storefront-app" aria-label={BRAND_NAME + " storefront"}>
+      <a href="#menu" className="skip-link">Skip to main content</a>
       <div className="app-header-shell">
         <header className="app-header">
-          <button type="button" className="header-brand" onClick={() => setView("home")}>
+          <button type="button" className="header-brand" onClick={() => setView("home")} aria-label="Return to home">
             <div className="brand-logo">
               <Image src="/logo.png" alt={`${BRAND_NAME} logo`} fill sizes="56px" priority />
             </div>
@@ -685,18 +805,18 @@ function StripeCheckoutForm({
               <span>{basketCount ? `${basketCount} in basket` : "Order online"}</span>
             </div>
           </button>
-          <button type="button" className="drawer-trigger" onClick={() => setIsDrawerOpen(true)}>
+          <button type="button" className="drawer-trigger" ref={drawerTriggerRef} onClick={() => setIsDrawerOpen(true)} aria-label="Open category navigation">
             Browse
           </button>
         </header>
       </div>
 
       {isDrawerOpen && (
-        <div className="drawer-overlay" onClick={() => setIsDrawerOpen(false)}>
+        <div className="drawer-overlay" ref={drawerRef} onClick={() => setIsDrawerOpen(false)} role="dialog" aria-modal="true" aria-label="Category navigation">
           <nav className="drawer-content" onClick={e => e.stopPropagation()}>
             <div className="drawer-head">
               <strong>All Categories</strong>
-              <button type="button" onClick={() => setIsDrawerOpen(false)}>Close</button>
+              <button type="button" aria-label="Close category navigation" onClick={() => setIsDrawerOpen(false)}>Close</button>
             </div>
             <div className="drawer-links">
               {categories.map(category => (
@@ -704,6 +824,7 @@ function StripeCheckoutForm({
                   key={category.id}
                   className="drawer-link"
                   onClick={() => openMenu(category.id)}
+                  aria-label={`Browse ${category.name}`}
                 >
                   <span className="material-icons category-icon" aria-hidden="true">
                     {getCategoryIcon(category.name)}
@@ -717,16 +838,32 @@ function StripeCheckoutForm({
       )}
 
       {error && (
-        <div className="error-toast" onClick={() => setError(null)}>
+        <div className="error-toast" role="alert" aria-live="assertive">
+          <span className="material-icons error-card-icon" aria-hidden="true">error_outline</span>
           <p>{error}</p>
-          <small>Click to dismiss</small>
+          <div className="error-toast-actions">
+            <button type="button" className="primary-action" onClick={() => void bootstrap()} aria-label="Retry loading storefront">
+              Retry
+            </button>
+            <button type="button" className="dismiss-btn" onClick={() => setError(null)} aria-label="Dismiss error">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isRedirecting && (
+        <div className="checkout-redirect-overlay" role="status" aria-live="polite">
+          <div className="spinner" />
+          <p>Redirecting to payment...</p>
         </div>
       )}
 
       {checkoutState && paymentState !== "paying" && (
         <div className="success-overlay">
           <div className="success-card">
-            <h2>Success!</h2>
+            <span className="material-icons" aria-hidden="true" style={{ fontSize: 48, color: "var(--green)", marginBottom: 8 }}>check_circle</span>
+            <h2>Order confirmed!</h2>
             <p>{checkoutState}</p>
             <button className="primary-action" onClick={() => { setCheckoutState(null); setPaymentState("idle"); }}>
               Back to Store
@@ -758,13 +895,14 @@ function StripeCheckoutForm({
 
       {paymentState === "failed" && (
         <div className="success-overlay">
-          <div className="success-card">
+          <div className="success-card payment-failed-card">
+            <span className="material-icons" aria-hidden="true" style={{ fontSize: 48, color: "var(--primary)", marginBottom: 8 }}>error_outline</span>
             <h2>Payment Failed</h2>
             <p>{error || "Your card was not charged. Please try again."}</p>
             <button className="primary-action" onClick={() => { setPaymentState("paying"); setError(null); }}>
               Try Again
             </button>
-            <button style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "var(--text)", padding: "10px 24px", borderRadius: 8, cursor: "pointer" }} onClick={() => { setPaymentState("idle"); setPendingPayment(null); setError(null); }}>
+            <button type="button" className="dismiss-btn" style={{ marginTop: 12 }} onClick={() => { setPaymentState("idle"); setPendingPayment(null); setError(null); }}>
               Cancel
             </button>
           </div>
@@ -772,7 +910,7 @@ function StripeCheckoutForm({
       )}
 
       {view === "home" ? (
-        <section className="home-view view-enter">
+        <section id="menu" className="home-view view-enter">
           <StorefrontHero
             basketCount={basketCount}
             brandName={BRAND_NAME}
@@ -834,7 +972,7 @@ function StripeCheckoutForm({
       ) : null}
 
       {view === "menu" ? (
-        <section className="menu-view view-enter">
+        <section id="menu" className="menu-view view-enter">
           <section className="menu-hero">
             <div>
               <p className="section-kicker">Menu category</p>
@@ -879,6 +1017,16 @@ function StripeCheckoutForm({
           </section>
 
           <section className="menu-list">
+            {menuError && !catalog ? (
+              <div className="menu-error-card" role="alert">
+                <span className="material-icons error-card-icon" aria-hidden="true">error_outline</span>
+                <h2>Could not load the menu</h2>
+                <p>{menuError}</p>
+                <button type="button" className="primary-action" onClick={() => void bootstrap()} aria-label="Retry loading menu">
+                  Try again
+                </button>
+              </div>
+            ) : null}
             {activeCategory ? (
               <CategoryStory
                 title="Fast lunch favourites first"
@@ -1048,6 +1196,27 @@ function StripeCheckoutForm({
 
       {view === "basket" ? (
         <section className="basket-view view-enter">
+          <nav className="step-indicator" aria-label="Checkout progress">
+            <span className={`step-indicator-step${view === "basket" && !checkoutState ? " step-indicator-step-active" : ""}`}>
+              <span className="material-icons" aria-hidden="true">restaurant_menu</span>
+              Menu
+            </span>
+            <span className={`step-indicator-divider${basketCount > 0 ? " step-indicator-divider-done" : ""}`} />
+            <span className={`step-indicator-step${view === "basket" && !checkoutState ? " step-indicator-step-active" : ""}`}>
+              <span className="material-icons" aria-hidden="true">shopping_bag</span>
+              Details
+            </span>
+            <span className="step-indicator-divider" />
+            <span className={`step-indicator-step${paymentState === "paying" || paymentState === "confirmed" ? " step-indicator-step-active" : ""}`}>
+              <span className="material-icons" aria-hidden="true">credit_card</span>
+              Payment
+            </span>
+            <span className="step-indicator-divider" />
+            <span className={`step-indicator-step${checkoutState ? " step-indicator-step-active step-indicator-step-done" : ""}`}>
+              <span className="material-icons" aria-hidden="true">check_circle</span>
+              Confirmed
+            </span>
+          </nav>
           <div className="basket-layout">
             <section className="content-panel">
               <div className="panel-head">
@@ -1067,6 +1236,9 @@ function StripeCheckoutForm({
                     <article key={item.id} className="basket-row">
                       <div>
                         <strong>{item.quantity}x {item.itemName}</strong>
+                        {item.quantity > 1 ? (
+                          <p className="basket-row-price">{formatMoney(item.lineTotalAmount / item.quantity)} each</p>
+                        ) : null}
                         {item.modifiers.length ? (
                           <p>
                             {item.modifiers
@@ -1123,18 +1295,21 @@ function StripeCheckoutForm({
                   </span>
                 ))}
               </div>
-              <form className="checkout-form" onSubmit={handleCheckout}>
+              <form className="checkout-form" onSubmit={handleCheckout} noValidate>
                 <label className="field">
                   Full name
-                  <input className="text-input" value={checkoutForm.customerName} onChange={event => setCheckoutForm(current => ({ ...current, customerName: event.target.value }))} required />
+                  <input className={`text-input${fieldErrors.customerName ? " text-input-error" : ""}`} value={checkoutForm.customerName} onChange={event => { setCheckoutForm(current => ({ ...current, customerName: event.target.value })); if (fieldErrors.customerName) setFieldErrors(prev => { const next = { ...prev }; delete next.customerName; return next; }); }} onBlur={() => { const e = validateCheckout({...checkoutForm, customerName: checkoutForm.customerName}); setFieldErrors(prev => { if (e.customerName) return { ...prev, customerName: e.customerName }; const next = { ...prev }; delete next.customerName; return next; }); }} required aria-invalid={!!fieldErrors.customerName} aria-describedby={fieldErrors.customerName ? "error-customerName" : undefined} />
+                  {fieldErrors.customerName && <span id="error-customerName" className="field-error" role="alert">{fieldErrors.customerName}</span>}
                 </label>
                 <label className="field">
                   Email
-                  <input className="text-input" type="email" inputMode="email" value={checkoutForm.customerEmail} onChange={event => setCheckoutForm(current => ({ ...current, customerEmail: event.target.value }))} />
+                  <input className={`text-input${fieldErrors.customerEmail ? " text-input-error" : ""}`} type="email" inputMode="email" value={checkoutForm.customerEmail} onChange={event => { setCheckoutForm(current => ({ ...current, customerEmail: event.target.value })); if (fieldErrors.customerEmail) setFieldErrors(prev => { const next = { ...prev }; delete next.customerEmail; return next; }); }} onBlur={() => { const e = validateCheckout({...checkoutForm, customerEmail: checkoutForm.customerEmail}); setFieldErrors(prev => { if (e.customerEmail) return { ...prev, customerEmail: e.customerEmail }; const next = { ...prev }; delete next.customerEmail; return next; }); }} aria-invalid={!!fieldErrors.customerEmail} aria-describedby={fieldErrors.customerEmail ? "error-customerEmail" : undefined} />
+                  {fieldErrors.customerEmail && <span id="error-customerEmail" className="field-error" role="alert">{fieldErrors.customerEmail}</span>}
                 </label>
                 <label className="field">
                   Phone
-                  <input className="text-input" inputMode="tel" value={checkoutForm.customerPhone} onChange={event => setCheckoutForm(current => ({ ...current, customerPhone: event.target.value }))} />
+                  <input className={`text-input${fieldErrors.customerPhone ? " text-input-error" : ""}`} inputMode="tel" value={checkoutForm.customerPhone} onChange={event => { setCheckoutForm(current => ({ ...current, customerPhone: event.target.value })); if (fieldErrors.customerPhone) setFieldErrors(prev => { const next = { ...prev }; delete next.customerPhone; return next; }); }} onBlur={() => { const e = validateCheckout({...checkoutForm, customerPhone: checkoutForm.customerPhone}); setFieldErrors(prev => { if (e.customerPhone) return { ...prev, customerPhone: e.customerPhone }; const next = { ...prev }; delete next.customerPhone; return next; }); }} aria-invalid={!!fieldErrors.customerPhone} aria-describedby={fieldErrors.customerPhone ? "error-customerPhone" : undefined} />
+                  {fieldErrors.customerPhone && <span id="error-customerPhone" className="field-error" role="alert">{fieldErrors.customerPhone}</span>}
                 </label>
                 <label className="field">
                   Order type
@@ -1156,17 +1331,19 @@ function StripeCheckoutForm({
                     <label className="field">
                       Address line 1
                       <input
-                        className="text-input"
+                        className={`text-input${fieldErrors.deliveryAddressLine1 ? " text-input-error" : ""}`}
                         value={checkoutForm.deliveryAddressLine1}
-                        onChange={event =>
-                          setCheckoutForm(current => ({
-                            ...current,
-                            deliveryAddressLine1: event.target.value
-                          }))
-                        }
+                        onChange={event => {
+                          setCheckoutForm(current => ({ ...current, deliveryAddressLine1: event.target.value }));
+                          if (fieldErrors.deliveryAddressLine1) setFieldErrors(prev => { const next = { ...prev }; delete next.deliveryAddressLine1; return next; });
+                        }}
+                        onBlur={() => { const e = validateCheckout({...checkoutForm, deliveryAddressLine1: checkoutForm.deliveryAddressLine1}); setFieldErrors(prev => { if (e.deliveryAddressLine1) return { ...prev, deliveryAddressLine1: e.deliveryAddressLine1 }; const next = { ...prev }; delete next.deliveryAddressLine1; return next; }); }}
                         autoComplete="address-line1"
                         required
+                        aria-invalid={!!fieldErrors.deliveryAddressLine1}
+                        aria-describedby={fieldErrors.deliveryAddressLine1 ? "error-deliveryAddressLine1" : undefined}
                       />
+                      {fieldErrors.deliveryAddressLine1 && <span id="error-deliveryAddressLine1" className="field-error" role="alert">{fieldErrors.deliveryAddressLine1}</span>}
                     </label>
                     <label className="field">
                       Address line 2
@@ -1186,32 +1363,36 @@ function StripeCheckoutForm({
                       <label className="field">
                         Town or city
                         <input
-                          className="text-input"
+                          className={`text-input${fieldErrors.deliveryCity ? " text-input-error" : ""}`}
                           value={checkoutForm.deliveryCity}
-                          onChange={event =>
-                            setCheckoutForm(current => ({
-                              ...current,
-                              deliveryCity: event.target.value
-                            }))
-                          }
+                          onChange={event => {
+                            setCheckoutForm(current => ({ ...current, deliveryCity: event.target.value }));
+                            if (fieldErrors.deliveryCity) setFieldErrors(prev => { const next = { ...prev }; delete next.deliveryCity; return next; });
+                          }}
+                          onBlur={() => { const e = validateCheckout({...checkoutForm, deliveryCity: checkoutForm.deliveryCity}); setFieldErrors(prev => { if (e.deliveryCity) return { ...prev, deliveryCity: e.deliveryCity }; const next = { ...prev }; delete next.deliveryCity; return next; }); }}
                           autoComplete="address-level2"
                           required
+                          aria-invalid={!!fieldErrors.deliveryCity}
+                          aria-describedby={fieldErrors.deliveryCity ? "error-deliveryCity" : undefined}
                         />
+                        {fieldErrors.deliveryCity && <span id="error-deliveryCity" className="field-error" role="alert">{fieldErrors.deliveryCity}</span>}
                       </label>
                       <label className="field">
                         Postcode
                         <input
-                          className="text-input"
+                          className={`text-input${fieldErrors.deliveryPostcode ? " text-input-error" : ""}`}
                           value={checkoutForm.deliveryPostcode}
-                          onChange={event =>
-                            setCheckoutForm(current => ({
-                              ...current,
-                              deliveryPostcode: event.target.value
-                            }))
-                          }
+                          onChange={event => {
+                            setCheckoutForm(current => ({ ...current, deliveryPostcode: event.target.value }));
+                            if (fieldErrors.deliveryPostcode) setFieldErrors(prev => { const next = { ...prev }; delete next.deliveryPostcode; return next; });
+                          }}
+                          onBlur={() => { const e = validateCheckout({...checkoutForm, deliveryPostcode: checkoutForm.deliveryPostcode}); setFieldErrors(prev => { if (e.deliveryPostcode) return { ...prev, deliveryPostcode: e.deliveryPostcode }; const next = { ...prev }; delete next.deliveryPostcode; return next; }); }}
                           autoComplete="postal-code"
                           required
+                          aria-invalid={!!fieldErrors.deliveryPostcode}
+                          aria-describedby={fieldErrors.deliveryPostcode ? "error-deliveryPostcode" : undefined}
                         />
+                        {fieldErrors.deliveryPostcode && <span id="error-deliveryPostcode" className="field-error" role="alert">{fieldErrors.deliveryPostcode}</span>}
                       </label>
                     </div>
                   </fieldset>
@@ -1220,7 +1401,7 @@ function StripeCheckoutForm({
                   Kitchen notes
                   <textarea className="text-area" value={checkoutForm.specialInstructions} onChange={event => setCheckoutForm(current => ({ ...current, specialInstructions: event.target.value }))} placeholder="Pickup timing, allergies, or delivery notes" />
                 </label>
-                <button type="submit" className="primary-action" disabled={isPendingAction || !cart?.items.length}>
+                <button type="submit" className="primary-action" disabled={isPendingAction || !cart?.items.length || !isCheckoutValid}>
                   {isPendingAction ? "Placing Order..." : "Proceed to Payment"}
                 </button>
                 <p className="checkout-note">
@@ -1381,18 +1562,22 @@ function StripeCheckoutForm({
         </button>
       ) : null}
 
-      <nav className="bottom-nav" aria-label="Primary">
-        <button type="button" className={view === "home" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => setView("home")}>
+      <nav className="bottom-nav" aria-label="Primary navigation">
+        <button type="button" className={view === "home" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => setView("home")} aria-label="Home" aria-current={view === "home" ? "page" : undefined}>
+          <span className="material-icons" aria-hidden="true" style={{ fontSize: 20 }}>home</span>
           Home
         </button>
-        <button type="button" className={view === "menu" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => openMenu()}>
+        <button type="button" className={view === "menu" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => openMenu()} aria-label="Menu" aria-current={view === "menu" ? "page" : undefined}>
+          <span className="material-icons" aria-hidden="true" style={{ fontSize: 20 }}>restaurant_menu</span>
           Menu
         </button>
-        <button type="button" className={view === "builder" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => openBuilder()}>
+        <button type="button" className={view === "builder" ? "bottom-nav-item bottom-nav-item-active" : "bottom-nav-item"} onClick={() => openBuilder()} aria-label="Sandwich Builder" aria-current={view === "builder" ? "page" : undefined}>
+          <span className="material-icons" aria-hidden="true" style={{ fontSize: 20 }}>lunch_dining</span>
           Builder
         </button>
-        <button type="button" className={view === "basket" ? "bottom-nav-item bottom-nav-item-active" : isBasketPulseActive ? "bottom-nav-item bottom-nav-item-pulse" : "bottom-nav-item"} onClick={() => setView("basket")}>
-          Basket
+        <button type="button" className={view === "basket" ? "bottom-nav-item bottom-nav-item-active" : isBasketPulseActive ? "bottom-nav-item bottom-nav-item-pulse" : "bottom-nav-item"} onClick={() => setView("basket")} aria-label={`Basket with ${basketCount} items`} aria-current={view === "basket" ? "page" : undefined}>
+          <span className="material-icons" aria-hidden="true" style={{ fontSize: 20 }}>shopping_bag</span>
+          Basket{basketCount > 0 ? ` (${basketCount})` : ""}
         </button>
       </nav>
     </main>

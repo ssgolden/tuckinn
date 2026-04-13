@@ -18,9 +18,9 @@ export function SocialProof({ items }: SocialProofProps) {
           Choose a favourite, build your own sandwich, and keep the order moving without menu noise.
         </p>
       </div>
-      <div className="social-proof-grid">
+      <div className="social-proof-grid" role="list">
         {items.map(item => (
-          <article className="social-proof-card" key={item.title}>
+          <article className="social-proof-card" key={item.title} role="listitem">
             <span className="social-proof-kicker">{item.eyebrow}</span>
             <strong>{item.title}</strong>
             <p>{item.body}</p>

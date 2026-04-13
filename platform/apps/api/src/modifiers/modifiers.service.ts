@@ -43,6 +43,50 @@ export class ModifiersService {
     });
   }
 
+  async getModifierGroup(modifierGroupId: string) {
+    const modifierGroup = await this.prisma.modifierGroup.findUnique({
+      where: { id: modifierGroupId },
+      include: {
+        options: {
+          orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+        },
+        products: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                slug: true,
+                name: true
+              }
+            }
+          },
+          orderBy: [{ sortOrder: "asc" }]
+        }
+      }
+    });
+
+    if (!modifierGroup) {
+      throw new NotFoundException("Modifier group not found.");
+    }
+
+    return modifierGroup;
+  }
+
+  async listOptionsForGroup(modifierGroupId: string) {
+    const modifierGroup = await this.prisma.modifierGroup.findUnique({
+      where: { id: modifierGroupId }
+    });
+
+    if (!modifierGroup) {
+      throw new NotFoundException("Modifier group not found.");
+    }
+
+    return this.prisma.modifierOption.findMany({
+      where: { modifierGroupId },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+    });
+  }
+
   async createModifierGroup(dto: CreateModifierGroupDto) {
     const location = await this.prisma.location.findUnique({
       where: { code: dto.locationCode }
@@ -72,6 +116,18 @@ export class ModifiersService {
         include: {
           options: {
             orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+          },
+          products: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  slug: true,
+                  name: true
+                }
+              }
+            },
+            orderBy: [{ sortOrder: "asc" }]
           }
         }
       });
@@ -90,6 +146,18 @@ export class ModifiersService {
       include: {
         options: {
           orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+        },
+        products: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                slug: true,
+                name: true
+              }
+            }
+          },
+          orderBy: [{ sortOrder: "asc" }]
         }
       }
     });
@@ -304,5 +372,45 @@ export class ModifiersService {
         }
       }
     });
+  }
+
+  async deleteModifierGroup(modifierGroupId: string) {
+    const modifierGroup = await this.prisma.modifierGroup.findUnique({
+      where: { id: modifierGroupId }
+    });
+
+    if (!modifierGroup) {
+      throw new NotFoundException("Modifier group not found.");
+    }
+
+    await this.prisma.productModifierGroup.deleteMany({
+      where: { modifierGroupId }
+    });
+
+    await this.prisma.modifierOption.deleteMany({
+      where: { modifierGroupId }
+    });
+
+    await this.prisma.modifierGroup.delete({
+      where: { id: modifierGroupId }
+    });
+
+    return { success: true };
+  }
+
+  async deleteModifierOption(modifierOptionId: string) {
+    const modifierOption = await this.prisma.modifierOption.findUnique({
+      where: { id: modifierOptionId }
+    });
+
+    if (!modifierOption) {
+      throw new NotFoundException("Modifier option not found.");
+    }
+
+    await this.prisma.modifierOption.delete({
+      where: { id: modifierOptionId }
+    });
+
+    return { success: true };
   }
 }

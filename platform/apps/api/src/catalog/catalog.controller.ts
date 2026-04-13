@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { RoleCode } from "../../src/generated/prisma/index.js";
 import { ProductStatus } from "../../src/generated/prisma/index.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -25,6 +26,7 @@ export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 
   @Get("public")
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   getPublicCatalog(@Query("locationCode") locationCode?: string) {
     return this.catalogService.getPublicCatalog(locationCode);
   }
@@ -36,14 +38,30 @@ export class CatalogController {
     return this.catalogService.listCategories(locationCode);
   }
 
+  @Get("categories/:categoryId")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager, RoleCode.staff)
+  getCategory(@Param("categoryId") categoryId: string) {
+    return this.catalogService.getCategory(categoryId);
+  }
+
+  @Get("products/:productId")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager, RoleCode.staff)
+  getProduct(@Param("productId") productId: string) {
+    return this.catalogService.getProduct(productId);
+  }
+
   @Get("products")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager, RoleCode.staff)
   listProducts(
     @Query("locationCode") locationCode?: string,
-    @Query("categorySlug") categorySlug?: string
+    @Query("categorySlug") categorySlug?: string,
+    @Query("search") search?: string,
+    @Query("status") status?: string
   ) {
-    return this.catalogService.listProducts(locationCode, categorySlug);
+    return this.catalogService.listProducts(locationCode, categorySlug, search, status as ProductStatus | undefined);
   }
 
   @Post("categories")
@@ -93,5 +111,12 @@ export class CatalogController {
   @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
   deleteProduct(@Param("productId") productId: string) {
     return this.catalogService.deleteProduct(productId);
+  }
+
+  @Delete("categories/:categoryId")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(RoleCode.owner, RoleCode.admin)
+  async deleteCategory(@Param("categoryId") categoryId: string) {
+    return this.catalogService.deleteCategory(categoryId);
   }
 }

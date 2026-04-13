@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { FileText, Plus, Pencil, Trash2 } from "lucide-react";
+import { FileText, Plus, Pencil, Trash2, LayoutGrid, Inbox, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Card,
   CardContent,
@@ -25,7 +26,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +39,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { apiFetch, withAdminSession } from "@/lib/api";
+import { toast } from "sonner";
+import { EmptyState } from "@/components/empty-state";
 
 type ContentBlock = {
   id: string;
@@ -52,7 +54,7 @@ type ContentBlock = {
 };
 
 export default function ContentPage() {
-  const { session } = useAuth();
+  const { session, updateSession } = useAuth();
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export default function ContentPage() {
   const [editing, setEditing] = useState<ContentBlock | null>(null);
   const [form, setForm] = useState({ key: "", title: "", status: "draft" as ContentBlock["status"], message: "" });
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ContentBlock | null>(null);
 
   const fetchBlocks = useCallback(async () => {
     if (!session) return;
@@ -68,8 +71,8 @@ export default function ContentPage() {
       const data = await apiFetch<ContentBlock[]>("/content/blocks?locationCode=main", {}, session.accessToken);
       setBlocks(data);
       setError(null);
-    } catch (err: any) {
-      setError(err.message || "Failed to load content blocks");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load content blocks");
     } finally {
       setLoading(false);
     }
@@ -103,34 +106,35 @@ export default function ContentPage() {
           apiFetch(`/content/blocks/${editing.id}`, {
             method: "PATCH",
             body: JSON.stringify({ key: form.key, title: form.title, status: form.status, payload }),
-          }, token), () => {}
+          }, token), updateSession
         );
       } else {
         await withAdminSession(session, (token) =>
           apiFetch("/content/blocks?locationCode=main", {
             method: "POST",
             body: JSON.stringify({ key: form.key, title: form.title, status: form.status, payload }),
-          }, token), () => {}
+          }, token), updateSession
         );
       }
       setDialogOpen(false);
       fetchBlocks();
-    } catch (err: any) {
-      alert("Save failed: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Save failed: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(block: ContentBlock) {
-    if (!session || !confirm(`Delete "${block.title}"?`)) return;
+    if (!session) return;
     try {
       await withAdminSession(session, (token) =>
-        apiFetch(`/content/blocks/${block.id}`, { method: "DELETE" }, token), () => {}
+        apiFetch(`/content/blocks/${block.id}`, { method: "DELETE" }, token), updateSession
       );
+      toast.success("Content block deleted");
       fetchBlocks();
-    } catch (err: any) {
-      alert("Delete failed: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Delete failed: " + (err instanceof Error ? err.message : "Unknown error"));
     }
   }
 
@@ -142,16 +146,25 @@ export default function ContentPage() {
         apiFetch(`/content/blocks/${block.id}`, {
           method: "PATCH",
           body: JSON.stringify({ status: next }),
-        }, token), () => {}
+        }, token), updateSession
       );
       fetchBlocks();
-    } catch (err: any) {
-      alert("Update failed: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Update failed: " + (err instanceof Error ? err.message : "Unknown error"));
     }
   }
 
-  if (loading) return <div className="p-8 text-center text-muted-foreground">Loading content blocks…</div>;
-  if (error && blocks.length === 0) return <div className="p-8 text-center text-red-500">Error: {error}</div>;
+  if (loading) return <div className="p-8 text-center text-muted-foreground" role="status" aria-live="polite">Loading content blocks...</div>;
+  if (error && blocks.length === 0) return (
+    <div className="flex flex-col items-center justify-center py-20 text-destructive" role="alert">
+      <AlertTriangle className="h-12 w-12 mb-4 opacity-40" />
+      <p className="text-lg font-medium">Failed to load content blocks</p>
+      <p className="text-sm mt-1">{error}</p>
+      <Button variant="outline" size="sm" className="mt-4" onClick={fetchBlocks}>
+        Retry
+      </Button>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -161,10 +174,10 @@ export default function ContentPage() {
           <p className="text-muted-foreground">Manage CMS content — announcement bars, hero sections, promos.</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger render={<Button onClick={openCreate} />}>
+          <Button onClick={openCreate}>
             <Plus className="h-4 w-4 mr-2" /> New Block
-          </DialogTrigger>
-          <DialogContent>
+          </Button>
+          <DialogContent aria-modal="true">
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Block" : "Create Block"}</DialogTitle>
               <DialogDescription>
@@ -226,8 +239,15 @@ export default function ContentPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {blocks.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No content blocks yet.</TableCell></TableRow>
+              {blocks.length === 0 && !error ? (
+                <TableRow><TableCell colSpan={6} className="h-48">
+                  <EmptyState
+                    icon={LayoutGrid}
+                    title="No content blocks yet"
+                    description="Create your first content block to get started."
+                    action={{ label: "New Block", onClick: openCreate }}
+                  />
+                </TableCell></TableRow>
               ) : blocks.map((block) => (
                 <TableRow key={block.id}>
                   <TableCell className="font-mono text-xs">{block.key}</TableCell>
@@ -246,10 +266,10 @@ export default function ContentPage() {
                   </TableCell>
                   <TableCell className="text-sm">{new Date(block.createdAt).toLocaleDateString()}</TableCell>
                   <TableCell className="text-right space-x-1">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(block)}>
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(block)} aria-label={`Edit ${block.title}`}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(block)}>
+                    <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" onClick={() => setDeleteTarget(block)} aria-label={`Delete ${block.title}`}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </TableCell>
@@ -259,6 +279,16 @@ export default function ContentPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title="Delete content block"
+        description={`Are you sure you want to delete "${deleteTarget?.title}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => { if (deleteTarget) handleDelete(deleteTarget); }}
+      />
     </div>
   );
 }

@@ -31,6 +31,16 @@ export class ModifiersController {
     return this.modifiersService.listModifierGroups(locationCode);
   }
 
+  @Get("groups/:modifierGroupId")
+  getModifierGroup(@Param("modifierGroupId") modifierGroupId: string) {
+    return this.modifiersService.getModifierGroup(modifierGroupId);
+  }
+
+  @Get("groups/:modifierGroupId/options")
+  listOptionsForGroup(@Param("modifierGroupId") modifierGroupId: string) {
+    return this.modifiersService.listOptionsForGroup(modifierGroupId);
+  }
+
   @Post("groups")
   @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
   createModifierGroup(@Body() dto: CreateModifierGroupDto) {
@@ -59,6 +69,18 @@ export class ModifiersController {
     @Body() dto: UpdateModifierOptionDto
   ) {
     return this.modifiersService.updateModifierOption(modifierOptionId, dto);
+  }
+
+  @Delete("groups/:modifierGroupId")
+  @Roles(RoleCode.owner, RoleCode.admin)
+  async deleteModifierGroup(@Param("modifierGroupId") modifierGroupId: string) {
+    return this.modifiersService.deleteModifierGroup(modifierGroupId);
+  }
+
+  @Delete("options/:modifierOptionId")
+  @Roles(RoleCode.owner, RoleCode.admin, RoleCode.manager)
+  async deleteModifierOption(@Param("modifierOptionId") modifierOptionId: string) {
+    return this.modifiersService.deleteModifierOption(modifierOptionId);
   }
 
   @Post("attach")

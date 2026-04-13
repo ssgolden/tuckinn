@@ -1,17 +1,17 @@
-import { fetchCatalog } from "../../lib/catalog-data";
+import { fetchCatalog, type CatalogCategory, type CatalogProduct } from "../../lib/catalog-data";
 
 export async function SsrCatalog() {
-  const categories = await fetchCatalog();
+  const categories: CatalogCategory[] = await fetchCatalog();
   if (categories.length === 0) return null;
 
   return (
     <div style={{ display: "none" }} aria-hidden="true" data-seo="catalog">
       <h1>Tuckinn Proper Menu</h1>
-      {categories.map(cat => (
+      {categories.map((cat: CatalogCategory) => (
         <section key={cat.id}>
           <h2>{cat.name}</h2>
           <ul>
-            {cat.products.map(p => (
+            {cat.products.map((p: CatalogProduct) => (
               <li key={p.id}>{p.name}{p.shortDescription ? " — " + p.shortDescription : ""}</li>
             ))}
           </ul>

@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Min, MinLength } from "class-validator";
+import { IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from "class-validator";
 
 export class AttachModifierGroupDto {
   @IsString()
@@ -9,8 +9,7 @@ export class AttachModifierGroupDto {
   @MinLength(2)
   productSlug!: string;
 
-  @IsString()
-  @MinLength(2)
+  @IsUUID()
   modifierGroupId!: string;
 
   @IsOptional()

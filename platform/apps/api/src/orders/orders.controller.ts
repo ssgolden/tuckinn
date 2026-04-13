@@ -5,6 +5,7 @@ import {
   Query,
   UseGuards
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { OrderStatus, OrderType, RoleCode } from "../../src/generated/prisma/index.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../rbac/roles.decorator";
@@ -16,6 +17,7 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get("public/:orderNumber")
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   getPublicOrder(
     @Param("orderNumber") orderNumber: string,
     @Query("email") email?: string,

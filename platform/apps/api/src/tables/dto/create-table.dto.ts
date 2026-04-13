@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, IsBoolean, Min, Max } from "class-validator";
+import { IsOptional, IsString, IsInt, IsBoolean, Min, Max, MinLength } from "class-validator";
 
 export class CreateTableDto {
   @IsInt()
@@ -11,6 +11,7 @@ export class CreateTableDto {
   name?: string;
 
   @IsString()
+  @MinLength(1)
   qrSlug!: string;
 
   @IsOptional()

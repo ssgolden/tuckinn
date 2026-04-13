@@ -30,6 +30,7 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { CartStatus, OrderStatus, PaymentProvider } from "../../src/generated/prisma/index.js";
+import { toMinorUnits, toDisplayAmount } from "../common/money.utils";
 import { PaymentsService } from "../payments/payments.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { StartCheckoutDto } from "./dto/start-checkout.dto";
@@ -93,7 +94,7 @@ export class CheckoutService {
       throw new BadRequestException("Delivery orders require a delivery address.");
     }
 
-    const totalMinor = this.toMinorUnits(cart.totalAmount);
+    const totalMinor = toMinorUnits(cart.totalAmount);
     if (totalMinor <= 0) {
       throw new BadRequestException("Cart total must be greater than zero.");
     }
@@ -179,7 +180,7 @@ export class CheckoutService {
       customerName: dto.customerName,
       lineItems: cart.items.map(item => ({
         name: item.itemName,
-        amount: this.toMinorUnits(item.unitPriceAmount),
+        amount: toMinorUnits(item.unitPriceAmount),
         quantity: item.quantity
       })),
       storefrontUrl: this.paymentsService.getStorefrontUrl()
@@ -214,10 +215,10 @@ export class CheckoutService {
         customerEmail: checkoutRecord.order.customerEmail,
         customerPhone: checkoutRecord.order.customerPhone,
         deliveryAddress,
-        subtotalAmount: this.toDisplayAmount(checkoutRecord.order.subtotalAmount),
-        discountAmount: this.toDisplayAmount(checkoutRecord.order.discountAmount),
-        taxAmount: this.toDisplayAmount(checkoutRecord.order.taxAmount),
-        totalAmount: this.toDisplayAmount(checkoutRecord.order.totalAmount)
+        subtotalAmount: toDisplayAmount(checkoutRecord.order.subtotalAmount),
+        discountAmount: toDisplayAmount(checkoutRecord.order.discountAmount),
+        taxAmount: toDisplayAmount(checkoutRecord.order.taxAmount),
+        totalAmount: toDisplayAmount(checkoutRecord.order.totalAmount)
       },
       payment: {
         id: checkoutRecord.payment.id,
@@ -235,14 +236,6 @@ export class CheckoutService {
     return `TK-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${randomUUID()
       .slice(0, 8)
       .toUpperCase()}`;
-  }
-
-  private toMinorUnits(value: unknown): number {
-    return Math.round(Number(value ?? 0) * 100);
-  }
-
-  private toDisplayAmount(value: unknown): number {
-    return Number(Number(value ?? 0).toFixed(2));
   }
 
   private normalizeDeliveryAddress(address: StartCheckoutDto["deliveryAddress"]) {

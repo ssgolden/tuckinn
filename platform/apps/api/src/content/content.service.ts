@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { ContentBlockStatus, type Prisma } from "../../src/generated/prisma/index.js";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateContentBlockDto } from "./dto/create-content-block.dto";
 import { UpdateContentBlockDto } from "./dto/update-content-block.dto";
@@ -6,6 +7,33 @@ import { UpdateContentBlockDto } from "./dto/update-content-block.dto";
 @Injectable()
 export class ContentService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async findPublished(locationCode = "main") {
+    const location = await this.prisma.location.findUnique({
+      where: { code: locationCode },
+    });
+    const where = {
+      ...(location ? { locationId: location.id } : {}),
+      status: ContentBlockStatus.published,
+      startsAt: { lte: new Date() },
+      OR: [
+        { endsAt: null },
+        { endsAt: { gte: new Date() } },
+      ],
+    };
+    const blocks = await this.prisma.contentBlock.findMany({
+      where,
+      orderBy: { createdAt: "asc" },
+      select: {
+        key: true,
+        title: true,
+        payload: true,
+        startsAt: true,
+        endsAt: true,
+      },
+    });
+    return blocks;
+  }
 
   async listBlocks(locationCode = "main") {
     const location = await this.prisma.location.findUnique({
@@ -36,7 +64,7 @@ export class ContentService {
         key: dto.key,
         title: dto.title,
         status: dto.status || "draft",
-        payload: dto.payload || {},
+        payload: (dto.payload ?? {}) as Prisma.InputJsonValue,
       },
     });
   }
@@ -51,7 +79,7 @@ export class ContentService {
         ...(dto.key !== undefined && { key: dto.key }),
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.status !== undefined && { status: dto.status }),
-        ...(dto.payload !== undefined && { payload: dto.payload }),
+        ...(dto.payload !== undefined && { payload: dto.payload as Prisma.InputJsonValue }),
       },
     });
   }

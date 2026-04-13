@@ -26,6 +26,7 @@ type AuthState = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  updateSession: (session: AdminSession) => void;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -37,9 +38,6 @@ export function useAuth() {
 }
 
 // ─── Provider ───────────────────────────────────────
-
-const DEV_EMAIL = "richronholl@tuckinn.local";
-const DEV_PASSWORD = "Tuckinn2026!";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AdminSession | null>(null);
@@ -54,30 +52,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const refreshed = await refreshAdminSession(existing.refreshToken);
           saveAdminSession(refreshed);
           setSession(refreshed);
-          setIsLoading(false);
-          return;
         } catch {
           clearAdminSession();
+          // Session expired — show login form
         }
       }
-      // Dev auto-login
-      try {
-        const response = await apiFetch<AdminSession>("/auth/staff/login", {
-          method: "POST",
-          body: JSON.stringify({ email: DEV_EMAIL, password: DEV_PASSWORD }),
-        });
-        saveAdminSession(response);
-        setSession(response);
-      } catch {
-        // If API login fails, set a fallback so the UI still renders
-        setSession({
-          accessToken: "dev-fallback",
-          refreshToken: "dev-fallback",
-          user: { id: "dev-1", email: DEV_EMAIL, firstName: "Platform", lastName: "Admin", roles: ["admin"] },
-        });
-      } finally {
-        setIsLoading(false);
-      }
+      // No stored session: show login form (dev mode or not)
+      setIsLoading(false);
     })();
   }, []);
 
@@ -106,8 +87,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [session]);
 
+  const updateSession = useCallback((newSession: AdminSession) => {
+    setSession(newSession);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ session, isLoading, login, logout, refresh }}>
+    <AuthContext.Provider value={{ session, isLoading, login, logout, refresh, updateSession }}>
       {children}
     </AuthContext.Provider>
   );

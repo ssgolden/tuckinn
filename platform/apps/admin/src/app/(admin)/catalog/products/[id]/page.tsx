@@ -1,8 +1,8 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { apiFetch, uploadAdminMedia, type AdminSession, type UploadedMediaAsset } from "@/lib/api";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { apiFetch, uploadAdminMedia, withAdminSession, type AdminSession, type UploadedMediaAsset } from "@/lib/api";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -25,9 +32,13 @@ import {
   Trash2,
   Loader2,
   ImageIcon,
+  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
+import { EmptyState } from "@/components/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
+type ProductStatus = "active" | "draft" | "archived";
 type Category = { id: string; slug: string; name: string };
 type Variant = { id: string; name: string; priceAmount: number; isDefault: boolean; sku: string | null };
 type ModifierGroup = {
@@ -42,7 +53,7 @@ type Product = {
 };
 
 export default function ProductDetailPage() {
-  const { session } = useAuth();
+  const { session, updateSession } = useAuth();
   const params = useParams();
   const router = useRouter();
   const productId = params.id as string;
@@ -56,58 +67,152 @@ export default function ProductDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<"details" | "variants" | "modifiers">("details");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmNavOpen, setConfirmNavOpen] = useState(false);
+  const [pendingNavUrl, setPendingNavUrl] = useState<string | null>(null);
 
   // Form state
   const [form, setForm] = useState({
     name: "", slug: "", shortDescription: "", longDescription: "",
-    imageUrl: "", imageAltText: "", isFeatured: false, status: "active" as string,
-    sortOrder: 0, categorySlug: "",
+    imageUrl: "", imageAltText: "", isFeatured: false, status: "active" as ProductStatus,
+    sortOrder: 0, categoryId: "",
   });
   const [variants, setVariants] = useState<Variant[]>([{ id: "", name: "Default", priceAmount: 0, isDefault: true, sku: null }]);
   const [assignedGroupIds, setAssignedGroupIds] = useState<string[]>([]);
 
+  // Track initial form state for dirty detection
+  const initialForm = useRef<string>("");
+  const initialVariants = useRef<string>("");
+  const initialGroupIds = useRef<string>("");
+
+  const isDirty = useMemo(() => {
+    return JSON.stringify(form) !== initialForm.current
+      || JSON.stringify(variants) !== initialVariants.current
+      || JSON.stringify(assignedGroupIds) !== initialGroupIds.current;
+  }, [form, variants, assignedGroupIds]);
+
+  // beforeunload for browser navigation
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
+  // Set initial refs for create mode (empty form)
+  useEffect(() => {
+    if (isCreate) {
+      initialForm.current = JSON.stringify(form);
+      initialVariants.current = JSON.stringify(variants);
+      initialGroupIds.current = JSON.stringify(assignedGroupIds);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     Promise.all([
       apiFetch<Category[]>("/catalog/categories?locationCode=main", undefined, session?.accessToken)
-        .then(setCategories).catch(() => {}),
+        .then(setCategories).catch((e) => { console.error("Failed to load categories:", e); }),
       apiFetch<ModifierGroup[]>("/modifiers/groups?locationCode=main", undefined, session?.accessToken)
-        .then(setAvailableGroups).catch(() => {}),
+        .then(setAvailableGroups).catch((e) => { console.error("Failed to load modifier groups:", e); }),
     ]);
     if (!isCreate) {
+      // Try single-product endpoint first; fall back to list+filter if API doesn't support it yet
       apiFetch<Product>(`/catalog/products/${productId}`, undefined, session?.accessToken)
+        .catch(() => {
+          // Fallback: fetch all products and find the one we need
+          return apiFetch<Product[]>("/catalog/products?locationCode=main", undefined, session?.accessToken)
+            .then((products) => {
+              const found = products.find(p => p.id === productId);
+              if (!found) throw new Error("Product not found");
+              return found;
+            });
+        })
         .then((p) => {
           setProduct(p);
-          setForm({
+          const formState = {
             name: p.name, slug: p.slug, shortDescription: p.shortDescription || "",
             longDescription: p.longDescription || "", imageUrl: p.imageUrl || "",
-            imageAltText: p.imageAltText || "", isFeatured: p.isFeatured, status: p.status,
-            sortOrder: p.sortOrder, categorySlug: p.category?.id || "",
-          });
-          setVariants(p.variants?.length ? p.variants : [{ id: "", name: "Default", priceAmount: 0, isDefault: true, sku: null }]);
-          setAssignedGroupIds(p.modifierGroups?.map(g => g.id) || []);
+            imageAltText: p.imageAltText || "", isFeatured: p.isFeatured, status: (["active", "draft", "archived"].includes(p.status) ? p.status : "draft") as ProductStatus,
+            sortOrder: p.sortOrder, categoryId: p.category?.id || "",
+          };
+          setForm(formState);
+          const vars = p.variants?.length ? p.variants : [{ id: "", name: "Default", priceAmount: 0, isDefault: true, sku: null }];
+          setVariants(vars);
+          const groupIds = p.modifierGroups?.map(g => g.id) || [];
+          setAssignedGroupIds(groupIds);
+          // Capture initial state for dirty tracking
+          initialForm.current = JSON.stringify(formState);
+          initialVariants.current = JSON.stringify(vars);
+          initialGroupIds.current = JSON.stringify(groupIds);
         })
-        .catch(() => toast.error("Failed to load product"))
+        .catch((e) => {
+          const msg = e instanceof Error ? e.message : "Failed to load product";
+          toast.error(msg);
+          console.error("Product load error:", e);
+        })
         .finally(() => setLoading(false));
     }
   }, [productId, isCreate, session]);
 
   async function handleSave() {
+    if (!session) return;
     setSaving(true);
     try {
       if (isCreate) {
-        const created = await apiFetch<Product>("/catalog/products", {
-          method: "POST",
-          body: JSON.stringify({ ...form, locationCode: "main", variantName: variants[0]?.name || "Default", priceAmount: variants[0]?.priceAmount || 0 }),
-        }, session?.accessToken);
+        const created = await withAdminSession(session, (token) =>
+          apiFetch<Product>("/catalog/products", {
+            method: "POST",
+            body: JSON.stringify({
+              name: form.name,
+              slug: form.slug,
+              shortDescription: form.shortDescription,
+              longDescription: form.longDescription,
+              imageUrl: form.imageUrl || undefined,
+              imageAltText: form.imageAltText || undefined,
+              isFeatured: form.isFeatured,
+              sortOrder: form.sortOrder,
+              categoryId: form.categoryId || undefined,
+              locationCode: "main",
+              variantName: variants[0]?.name || "Default",
+              priceAmount: variants[0]?.priceAmount || 0,
+            }),
+          }, token), updateSession
+        );
         toast.success("Product created");
         router.push(`/catalog/products/${created.id}`);
       } else {
-        const updateData: Record<string, unknown> = { ...form, variants: variants.map(v => ({ ...v, priceAmount: Number(v.priceAmount) })) };
-        if (form.imageUrl === "" && product?.imageUrl) updateData.clearImage = true;
-        await apiFetch(`/catalog/products/${productId}`, {
-          method: "PATCH", body: JSON.stringify(updateData),
-        }, session?.accessToken);
+        const defaultVariant = variants.find(v => v.isDefault) || variants[0];
+        const updateData = {
+          name: form.name,
+          slug: form.slug,
+          shortDescription: form.shortDescription,
+          longDescription: form.longDescription,
+          imageUrl: form.imageUrl,
+          imageAltText: form.imageAltText,
+          isFeatured: form.isFeatured,
+          status: form.status,
+          sortOrder: form.sortOrder,
+          categoryId: form.categoryId || null,
+          variantName: defaultVariant?.name,
+          priceAmount: defaultVariant ? Number(defaultVariant.priceAmount) : undefined,
+          sku: defaultVariant?.sku || undefined,
+          clearImage: form.imageUrl === "" && !!product?.imageUrl,
+        };
+        await withAdminSession(session, (token) =>
+          apiFetch(`/catalog/products/${productId}`, {
+            method: "PATCH", body: JSON.stringify(updateData),
+          }, token), updateSession
+        );
         toast.success("Product updated");
+        // Reset dirty state after successful save
+        initialForm.current = JSON.stringify(form);
+        initialVariants.current = JSON.stringify(variants);
+        initialGroupIds.current = JSON.stringify(assignedGroupIds);
       }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Save failed");
@@ -121,7 +226,7 @@ export default function ProductDetailPage() {
     if (!file || !session) return;
     setUploading(true);
     try {
-      const asset = await uploadAdminMedia(file, session, (next) => setProduct(prev => prev)); // refresh session on 401
+      const asset = await uploadAdminMedia(file, session, updateSession);
       setForm(prev => ({ ...prev, imageUrl: asset.url, imageAltText: file.name }));
       toast.success("Image uploaded");
     } catch (e: unknown) {
@@ -132,44 +237,58 @@ export default function ProductDetailPage() {
   }
 
   async function handleArchive() {
+    if (!session) return;
     try {
-      await apiFetch(`/catalog/products/${productId}/archive`, { method: "PATCH" }, session?.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/catalog/products/${productId}/archive`, { method: "PATCH" }, token), updateSession
+      );
       setForm(prev => ({ ...prev, status: "archived" }));
       toast.success("Product archived");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Archive failed"); }
   }
 
   async function handleRestore() {
+    if (!session) return;
     try {
-      await apiFetch(`/catalog/products/${productId}/restore`, { method: "PATCH" }, session?.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/catalog/products/${productId}/restore`, { method: "PATCH" }, token), updateSession
+      );
       setForm(prev => ({ ...prev, status: "active" }));
       toast.success("Product restored");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Restore failed"); }
   }
 
   async function handleDelete() {
-    if (!confirm("Permanently delete this product? This cannot be undone.")) return;
+    if (!session) return;
     try {
-      await apiFetch(`/catalog/products/${productId}`, { method: "DELETE" }, session?.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/catalog/products/${productId}`, { method: "DELETE" }, token), updateSession
+      );
       toast.success("Product deleted");
       router.push("/catalog/products");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Delete failed"); }
   }
 
   async function handleAttachGroup(groupId: string) {
+    if (!session) return;
     try {
-      await apiFetch("/modifiers/attach", {
-        method: "POST",
-        body: JSON.stringify({ locationCode: "main", productSlug: form.slug, modifierGroupId: groupId }),
-      }, session?.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch("/modifiers/attach", {
+          method: "POST",
+          body: JSON.stringify({ locationCode: "main", productSlug: form.slug, modifierGroupId: groupId }),
+        }, token), updateSession
+      );
       setAssignedGroupIds(prev => [...prev, groupId]);
       toast.success("Modifier group attached");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Attach failed"); }
   }
 
   async function handleDetachGroup(groupId: string) {
+    if (!session) return;
     try {
-      await apiFetch(`/modifiers/products/${productId}/groups/${groupId}`, { method: "DELETE" }, session?.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/modifiers/products/${productId}/groups/${groupId}`, { method: "DELETE" }, token), updateSession
+      );
       setAssignedGroupIds(prev => prev.filter(id => id !== groupId));
       toast.success("Modifier group detached");
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Detach failed"); }
@@ -177,16 +296,16 @@ export default function ProductDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-64" role="status" aria-live="polite">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
-  const statusColors: Record<string, string> = {
-    active: "bg-green-100 text-green-800",
-    draft: "bg-yellow-100 text-yellow-800",
-    archived: "bg-stone-100 text-stone-600",
+  const statusColors: Record<ProductStatus, string> = {
+    active: "bg-emerald-500/10 text-emerald-400",
+    draft: "bg-yellow-500/10 text-yellow-400",
+    archived: "bg-stone-500/10 text-stone-400",
   };
 
   return (
@@ -194,7 +313,10 @@ export default function ProductDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => router.push("/catalog/products")}>
+          <Button variant="ghost" size="sm" onClick={() => {
+            if (isDirty) { setPendingNavUrl("/catalog/products"); setConfirmNavOpen(true); }
+            else router.push("/catalog/products");
+          }}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Products
           </Button>
           <div>
@@ -203,10 +325,10 @@ export default function ProductDetailPage() {
             </h1>
             <div className="flex items-center gap-2 mt-1">
               <Badge variant="outline" className="font-mono text-xs">{form.slug || "slug"}</Badge>
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[form.status] || "bg-stone-100 text-stone-600"}`}>
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[form.status] || "bg-stone-500/10 text-stone-400"}`}>
                 {form.status}
               </span>
-              {form.isFeatured && <Badge className="bg-amber-100 text-amber-800 text-xs">Featured</Badge>}
+              {form.isFeatured && <Badge className="bg-amber-500/10 text-amber-400 text-xs">Featured</Badge>}
             </div>
           </div>
         </div>
@@ -218,7 +340,7 @@ export default function ProductDetailPage() {
             <Button variant="outline" size="sm" onClick={handleRestore}><RotateCcw className="h-4 w-4 mr-1" /> Restore</Button>
           )}
           {!isCreate && form.status === "archived" && (
-            <Button variant="destructive" size="sm" onClick={handleDelete}><Trash2 className="h-4 w-4 mr-1" /> Delete</Button>
+            <Button variant="destructive" size="sm" onClick={() => setConfirmDeleteOpen(true)}><Trash2 className="h-4 w-4 mr-1" /> Delete</Button>
           )}
           <Button onClick={handleSave} disabled={saving || !form.name}>
             {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
@@ -263,14 +385,15 @@ export default function ProductDetailPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Category</Label>
-                    <select
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
-                      value={form.categorySlug}
-                      onChange={(e) => setForm({ ...form, categorySlug: e.target.value })}
-                    >
-                      <option value="">Select category</option>
-                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <Select value={form.categoryId || "_none"} onValueChange={(v) => setForm({ ...form, categoryId: (v ?? "_none") === "_none" ? "" : (v ?? "") })}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_none">No category</SelectItem>
+                        {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label>Sort Order</Label>
@@ -312,14 +435,23 @@ export default function ProductDetailPage() {
                 <div className="space-y-3">
                   {variants.map((v, i) => (
                     <div key={v.id || i} className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-                      <input type="radio" name="defaultVariant" checked={v.isDefault} onChange={() => setVariants(variants.map((vv, vi) => ({ ...vv, isDefault: vi === i })))} className="h-4 w-4" />
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="defaultVariant"
+                          checked={v.isDefault}
+                          onChange={() => setVariants(variants.map((vv, vi) => ({ ...vv, isDefault: vi === i })))}
+                          className="h-4 w-4 accent-primary"
+                        />
+                        <span className="text-xs text-muted-foreground">Default</span>
+                      </label>
                       <Input value={v.name} onChange={(e) => setVariants(variants.map((vv, vi) => vi === i ? { ...vv, name: e.target.value } : vv))} placeholder="Variant name" className="flex-1" />
                       <div className="relative w-28">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">€</span>
                         <Input type="number" step="0.01" value={v.priceAmount} onChange={(e) => setVariants(variants.map((vv, vi) => vi === i ? { ...vv, priceAmount: parseFloat(e.target.value) || 0 } : vv))} className="pl-7" />
                       </div>
                       {variants.length > 1 && (
-                        <Button variant="ghost" size="sm" onClick={() => setVariants(variants.filter((_, vi) => vi !== i))}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => setVariants(variants.filter((_, vi) => vi !== i))} aria-label="Remove variant"><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
                       )}
                     </div>
                   ))}
@@ -364,7 +496,11 @@ export default function ProductDetailPage() {
                   </div>
                 )}
                 {assignedGroupIds.length === 0 && availableGroups.filter(g => !assignedGroupIds.includes(g.id)).length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-8">No modifier groups available. Create some in the Modifiers section.</p>
+                  <EmptyState
+                    icon={SlidersHorizontal}
+                    title="No modifier groups"
+                    description="No modifier groups available. Create some in the Modifiers section."
+                  />
                 )}
               </CardContent>
             </Card>
@@ -381,7 +517,7 @@ export default function ProductDetailPage() {
               {form.imageUrl ? (
                 <div className="relative aspect-square rounded-lg overflow-hidden border bg-muted">
                   <img src={form.imageUrl} alt={form.imageAltText || form.name} className="object-cover w-full h-full" />
-                  <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={() => setForm({ ...form, imageUrl: "", imageAltText: "" })}>
+                  <Button variant="destructive" size="sm" className="absolute top-2 right-2" onClick={() => setForm({ ...form, imageUrl: "", imageAltText: "" })} aria-label="Remove image">
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -417,12 +553,40 @@ export default function ProductDetailPage() {
             <CardContent className="text-sm space-y-2">
               <div className="flex justify-between"><span className="text-muted-foreground">Variants</span><span className="font-medium">{variants.length}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Modifier Groups</span><span className="font-medium">{assignedGroupIds.length}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Category</span><span className="font-medium">{categories.find(c => c.id === form.categorySlug)?.name || "—"}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Category</span><span className="font-medium">{categories.find(c => c.id === form.categoryId)?.name || "—"}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium capitalize">{form.status}</span></div>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Delete product"
+        description="Permanently delete this product? This action cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={handleDelete}
+      />
+
+      {/* Unsaved changes navigation confirmation */}
+      <ConfirmDialog
+        open={confirmNavOpen}
+        onOpenChange={setConfirmNavOpen}
+        title="Unsaved changes"
+        description="You have unsaved changes. Are you sure you want to leave? Your changes will be lost."
+        confirmLabel="Leave"
+        destructive
+        onConfirm={() => {
+          setConfirmNavOpen(false);
+          const url = pendingNavUrl;
+          setPendingNavUrl(null);
+          if (url) {
+            router.push(url);
+          }
+        }}
+      />
     </div>
   );
 }

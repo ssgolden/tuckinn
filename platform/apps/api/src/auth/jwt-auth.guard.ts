@@ -14,9 +14,7 @@ type RequestWithUser = {
   user?: AuthenticatedUser;
 };
 
-const jwt: {
-  verify: (token: string, secret: string) => unknown;
-} = require("jsonwebtoken");
+import jwt from "jsonwebtoken";
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, withAdminSession } from "@/lib/api";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,10 +29,10 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Pencil, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Plus, Pencil, SlidersHorizontal, Trash2, LayoutGrid, AlertTriangle, Check } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type ModifierOption = {
   id: string;
@@ -56,7 +56,7 @@ type ModifierGroup = {
 };
 
 export default function ModifiersPage() {
-  const { session } = useAuth();
+  const { session, updateSession } = useAuth();
   const [groups, setGroups] = useState<ModifierGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +74,7 @@ export default function ModifiersPage() {
   const [newOption, setNewOption] = useState<{ groupId: string; name: string; price: string }>({ groupId: "", name: "", price: "0" });
   const [editOption, setEditOption] = useState<{ groupId: string; optionId: string; name: string; price: string; isDefault: boolean; isActive: boolean } | null>(null);
   const [savingOption, setSavingOption] = useState(false);
+  const [deleteOptionId, setDeleteOptionId] = useState<string | null>(null);
 
   async function loadGroups() {
     setLoading(true);
@@ -89,7 +90,6 @@ export default function ModifiersPage() {
       const msg = e instanceof Error ? e.message : "Failed to load modifiers";
       if (msg.includes("401")) {
         setError("API authentication required — login with real credentials to manage modifiers.");
-        setGroups(sampleGroups);
       } else {
         setError(msg);
       }
@@ -122,18 +122,23 @@ export default function ModifiersPage() {
   }
 
   async function handleSave() {
+    if (!session) return;
     try {
       if (editing) {
-        await apiFetch(`/modifiers/groups/${editing.id}`, {
-          method: "PATCH",
-          body: JSON.stringify(form),
-        }, session?.accessToken);
+        await withAdminSession(session, (token) =>
+          apiFetch(`/modifiers/groups/${editing.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(form),
+          }, token), updateSession
+        );
         toast.success("Modifier group updated");
       } else {
-        await apiFetch("/modifiers/groups", {
-          method: "POST",
-          body: JSON.stringify({ ...form, locationCode: "main" }),
-        }, session?.accessToken);
+        await withAdminSession(session, (token) =>
+          apiFetch("/modifiers/groups", {
+            method: "POST",
+            body: JSON.stringify({ ...form, locationCode: "main" }),
+          }, token), updateSession
+        );
         toast.success("Modifier group created");
       }
       setDialogOpen(false);
@@ -143,121 +148,23 @@ export default function ModifiersPage() {
     }
   }
 
-  const sampleGroups: ModifierGroup[] = [
-    {
-      id: "e2d1f220", name: "Bread Choice", description: "Choose the bread or base for your sandwich build.", minSelect: 1, maxSelect: 1, sortOrder: 0, isRequired: true,
-      options: [
-        { id: "o1", name: "White Bread", priceDeltaAmount: 0, sortOrder: 0, isDefault: true, isActive: true },
-        { id: "o2", name: "Brown Bread", priceDeltaAmount: 0, sortOrder: 1, isDefault: false, isActive: true },
-        { id: "o3", name: "White Roll", priceDeltaAmount: 0, sortOrder: 2, isDefault: false, isActive: true },
-        { id: "o4", name: "Brown Roll", priceDeltaAmount: 0, sortOrder: 3, isDefault: false, isActive: true },
-        { id: "o5", name: "Baguette", priceDeltaAmount: 0, sortOrder: 4, isDefault: false, isActive: true },
-        { id: "o6", name: "Wrap", priceDeltaAmount: 0, sortOrder: 5, isDefault: false, isActive: true },
-        { id: "o7", name: "Pitta Bread", priceDeltaAmount: 0, sortOrder: 6, isDefault: false, isActive: true },
-        { id: "o8", name: "Bagel", priceDeltaAmount: 0, sortOrder: 7, isDefault: false, isActive: true },
-        { id: "o9", name: "Bakers Bread Of The Day", priceDeltaAmount: 0, sortOrder: 8, isDefault: false, isActive: true },
-      ],
-    },
-    {
-      id: "1d2c9f75", name: "Protein", description: "Choose the main filling for the sandwich.", minSelect: 1, maxSelect: 2, sortOrder: 1, isRequired: true,
-      options: [
-        { id: "p1", name: "Chicken", priceDeltaAmount: 0, sortOrder: 0, isDefault: true, isActive: true },
-        { id: "p2", name: "Roast Beef", priceDeltaAmount: 0, sortOrder: 1, isDefault: false, isActive: true },
-        { id: "p3", name: "Corn Beef", priceDeltaAmount: 0, sortOrder: 2, isDefault: false, isActive: true },
-        { id: "p4", name: "Tuna", priceDeltaAmount: 0, sortOrder: 3, isDefault: false, isActive: true },
-        { id: "p5", name: "Smoked Salmon", priceDeltaAmount: 1.50, sortOrder: 4, isDefault: false, isActive: true },
-        { id: "p6", name: "Egg", priceDeltaAmount: 0, sortOrder: 5, isDefault: false, isActive: true },
-        { id: "p7", name: "Bacon", priceDeltaAmount: 0, sortOrder: 6, isDefault: false, isActive: true },
-        { id: "p8", name: "Sausage", priceDeltaAmount: 0.75, sortOrder: 7, isDefault: false, isActive: true },
-        { id: "p9", name: "Honey Roast Ham", priceDeltaAmount: 0, sortOrder: 8, isDefault: false, isActive: true },
-        { id: "p10", name: "Ham", priceDeltaAmount: 0, sortOrder: 9, isDefault: false, isActive: true },
-        { id: "p11", name: "Palma Ham", priceDeltaAmount: 1.00, sortOrder: 10, isDefault: false, isActive: true },
-        { id: "p12", name: "Chorizo", priceDeltaAmount: 0, sortOrder: 11, isDefault: false, isActive: true },
-        { id: "p13", name: "Salami", priceDeltaAmount: 0.75, sortOrder: 12, isDefault: false, isActive: true },
-        { id: "p14", name: "Pork", priceDeltaAmount: 0, sortOrder: 13, isDefault: false, isActive: true },
-        { id: "p15", name: "Pulled Pork", priceDeltaAmount: 1.00, sortOrder: 14, isDefault: false, isActive: true },
-        { id: "p16", name: "Prawns", priceDeltaAmount: 1.50, sortOrder: 15, isDefault: false, isActive: true },
-      ],
-    },
-    {
-      id: "54ad12a3", name: "Add Cheese", description: "Add one or two cheeses to finish the build.", minSelect: 0, maxSelect: 2, sortOrder: 2, isRequired: false,
-      options: [
-        { id: "c1", name: "Cheddar", priceDeltaAmount: 0, sortOrder: 0, isDefault: false, isActive: true },
-        { id: "c2", name: "Feta", priceDeltaAmount: 0, sortOrder: 1, isDefault: false, isActive: true },
-        { id: "c3", name: "Cream Cheese", priceDeltaAmount: 0, sortOrder: 2, isDefault: false, isActive: true },
-        { id: "c4", name: "Gouda", priceDeltaAmount: 0, sortOrder: 3, isDefault: false, isActive: true },
-        { id: "c5", name: "Mozzarella", priceDeltaAmount: 0, sortOrder: 4, isDefault: false, isActive: true },
-      ],
-    },
-    {
-      id: "35965b18", name: "Fresh Veg", description: "Choose fresh veg and salad fillings.", minSelect: 1, maxSelect: 4, sortOrder: 3, isRequired: true,
-      options: [
-        { id: "vg1", name: "Lettuce", priceDeltaAmount: 0, sortOrder: 0, isDefault: true, isActive: true },
-        { id: "vg2", name: "Tomato", priceDeltaAmount: 0, sortOrder: 1, isDefault: false, isActive: true },
-        { id: "vg3", name: "Red Onion", priceDeltaAmount: 0, sortOrder: 2, isDefault: false, isActive: true },
-        { id: "vg4", name: "Cucumber", priceDeltaAmount: 0, sortOrder: 3, isDefault: false, isActive: true },
-        { id: "vg5", name: "Sweetcorn", priceDeltaAmount: 0, sortOrder: 4, isDefault: false, isActive: true },
-        { id: "vg6", name: "Spinach", priceDeltaAmount: 0, sortOrder: 5, isDefault: false, isActive: true },
-        { id: "vg7", name: "Rocket", priceDeltaAmount: 0, sortOrder: 6, isDefault: false, isActive: true },
-        { id: "vg8", name: "Grated Carrot", priceDeltaAmount: 0, sortOrder: 7, isDefault: false, isActive: true },
-        { id: "vg9", name: "Peppers", priceDeltaAmount: 0, sortOrder: 8, isDefault: false, isActive: true },
-        { id: "vg10", name: "Beetroot", priceDeltaAmount: 0, sortOrder: 9, isDefault: false, isActive: true },
-        { id: "vg11", name: "Mushrooms", priceDeltaAmount: 0, sortOrder: 10, isDefault: false, isActive: true },
-        { id: "vg12", name: "Avocado", priceDeltaAmount: 1.00, sortOrder: 11, isDefault: false, isActive: true },
-        { id: "vg13", name: "Jalapenos", priceDeltaAmount: 0, sortOrder: 12, isDefault: false, isActive: true },
-        { id: "vg14", name: "Olives", priceDeltaAmount: 0, sortOrder: 13, isDefault: false, isActive: true },
-        { id: "vg15", name: "Garlic", priceDeltaAmount: 0, sortOrder: 14, isDefault: false, isActive: true },
-        { id: "vg16", name: "Celery", priceDeltaAmount: 0, sortOrder: 15, isDefault: false, isActive: true },
-      ],
-    },
-    {
-      id: "02d5f075", name: "Signature Sauces", description: "Choose one or two sauces to finish the sandwich.", minSelect: 1, maxSelect: 2, sortOrder: 4, isRequired: true,
-      options: [
-        { id: "s1", name: "Mayonnaise", priceDeltaAmount: 0, sortOrder: 0, isDefault: true, isActive: true },
-        { id: "s2", name: "Alioli", priceDeltaAmount: 0, sortOrder: 1, isDefault: false, isActive: true },
-        { id: "s3", name: "English Mustard", priceDeltaAmount: 0, sortOrder: 2, isDefault: false, isActive: true },
-        { id: "s4", name: "Dijon Mustard", priceDeltaAmount: 0, sortOrder: 3, isDefault: false, isActive: true },
-        { id: "s5", name: "Horseradish", priceDeltaAmount: 0, sortOrder: 4, isDefault: false, isActive: true },
-        { id: "s6", name: "Mint Sauce", priceDeltaAmount: 0, sortOrder: 5, isDefault: false, isActive: true },
-        { id: "s7", name: "Cranberry Sauce", priceDeltaAmount: 0, sortOrder: 6, isDefault: false, isActive: true },
-        { id: "s8", name: "Tomato Ketchup", priceDeltaAmount: 0, sortOrder: 7, isDefault: false, isActive: true },
-        { id: "s9", name: "Brown Sauce", priceDeltaAmount: 0, sortOrder: 8, isDefault: false, isActive: true },
-        { id: "s10", name: "Bbq Sauce", priceDeltaAmount: 0, sortOrder: 9, isDefault: false, isActive: true },
-        { id: "s11", name: "Pesto", priceDeltaAmount: 0, sortOrder: 10, isDefault: false, isActive: true },
-        { id: "s12", name: "Ranch Sauce", priceDeltaAmount: 0, sortOrder: 11, isDefault: false, isActive: true },
-        { id: "s13", name: "Sweet Chilli", priceDeltaAmount: 0, sortOrder: 12, isDefault: false, isActive: true },
-        { id: "s14", name: "Hot Sauce", priceDeltaAmount: 0, sortOrder: 13, isDefault: false, isActive: true },
-        { id: "s15", name: "Branston Pickle", priceDeltaAmount: 0, sortOrder: 14, isDefault: false, isActive: true },
-      ],
-    },
-    {
-      id: "0ecc6333", name: "Premium Extras", description: "Optional premium add-ons for bigger basket value.", minSelect: 0, maxSelect: 4, sortOrder: 5, isRequired: false,
-      options: [
-        { id: "e1", name: "Extra Protein", priceDeltaAmount: 2.50, sortOrder: 0, isDefault: false, isActive: true },
-        { id: "e2", name: "Cheddar Upgrade", priceDeltaAmount: 1.25, sortOrder: 1, isDefault: false, isActive: true },
-        { id: "e3", name: "Avocado Upgrade", priceDeltaAmount: 1.25, sortOrder: 2, isDefault: false, isActive: true },
-        { id: "e4", name: "Crispy Onions", priceDeltaAmount: 0.75, sortOrder: 3, isDefault: false, isActive: true },
-      ],
-    },
-  ];
-
-  const displayGroups = groups.length > 0 ? groups : (error ? sampleGroups : []);
-
   async function handleAddOption() {
     if (!session || !newOption.groupId || !newOption.name) return;
     setSavingOption(true);
     try {
-      await apiFetch("/modifiers/options", {
-        method: "POST",
-        body: JSON.stringify({
-          locationCode: "main",
-          modifierGroupId: newOption.groupId,
-          name: newOption.name,
-          priceDeltaAmount: parseFloat(newOption.price) || 0,
-          isDefault: false,
-          isActive: true,
-        }),
-      }, session.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch("/modifiers/options", {
+          method: "POST",
+          body: JSON.stringify({
+            locationCode: "main",
+            modifierGroupId: newOption.groupId,
+            name: newOption.name,
+            priceDeltaAmount: parseFloat(newOption.price) || 0,
+            isDefault: false,
+            isActive: true,
+          }),
+        }, token), updateSession
+      );
       toast.success("Option added");
       setNewOption({ groupId: "", name: "", price: "0" });
       loadGroups();
@@ -269,15 +176,17 @@ export default function ModifiersPage() {
     if (!session || !editOption) return;
     setSavingOption(true);
     try {
-      await apiFetch(`/modifiers/options/${editOption.optionId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          name: editOption.name,
-          priceDeltaAmount: parseFloat(editOption.price) || 0,
-          isDefault: editOption.isDefault,
-          isActive: editOption.isActive,
-        }),
-      }, session.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/modifiers/options/${editOption.optionId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: editOption.name,
+            priceDeltaAmount: parseFloat(editOption.price) || 0,
+            isDefault: editOption.isDefault,
+            isActive: editOption.isActive,
+          }),
+        }, token), updateSession
+      );
       toast.success("Option updated");
       setEditOption(null);
       loadGroups();
@@ -286,9 +195,11 @@ export default function ModifiersPage() {
   }
 
   async function handleDeleteOption(optionId: string) {
-    if (!session || !confirm("Delete this option?")) return;
+    if (!session) return;
     try {
-      await apiFetch(`/modifiers/options/${optionId}`, { method: "DELETE" }, session.accessToken);
+      await withAdminSession(session, (token) =>
+        apiFetch(`/modifiers/options/${optionId}`, { method: "DELETE" }, token), updateSession
+      );
       toast.success("Option deleted");
       loadGroups();
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : "Delete failed"); }
@@ -307,10 +218,8 @@ export default function ModifiersPage() {
           <p className="text-muted-foreground">Manage customisation options for your menu items.</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger render={<Button onClick={openCreate} />}>
-  <Plus className="h-4 w-4 mr-2" /> New Group
-</DialogTrigger>
-          <DialogContent>
+          <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" /> New Group</Button>
+          <DialogContent aria-modal="true">
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Modifier Group" : "Create Modifier Group"}</DialogTitle>
               <DialogDescription>
@@ -353,14 +262,26 @@ export default function ModifiersPage() {
       </div>
 
       {error && (
-        <Card className="border-amber-200 bg-amber-50">
-          <CardContent className="pt-4 text-sm text-amber-800">
-            ⚠️ {error}
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="pt-4 text-sm text-amber-400">
+            <AlertTriangle className="h-4 w-4 inline mr-1.5 align-text-bottom" />{error}
+            <Button variant="outline" size="sm" className="ml-3 border-amber-500/30 text-amber-400 hover:bg-amber-500/10" onClick={loadGroups}>
+              Retry
+            </Button>
           </CardContent>
         </Card>
       )}
 
-      {displayGroups.map((group) => (
+      {groups.length === 0 && !loading && !error ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <LayoutGrid className="h-12 w-12 mb-3 opacity-40" />
+            <p className="text-lg font-medium">No modifier groups yet</p>
+            <p className="text-sm mb-4">Create your first modifier group to customise menu items.</p>
+            <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" /> New Group</Button>
+          </CardContent>
+        </Card>
+      ) : groups.map((group: ModifierGroup) => (
         <Card key={group.id}>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -370,10 +291,10 @@ export default function ModifiersPage() {
                 {group.isRequired && <Badge variant="secondary" className="text-xs">Required</Badge>}
               </CardTitle>
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="sm" onClick={() => setExpandedGroup(expandedGroup === group.id ? null : group.id)}>
+                <Button variant="ghost" size="sm" onClick={() => setExpandedGroup(expandedGroup === group.id ? null : group.id)} aria-expanded={expandedGroup === group.id}>
                   {expandedGroup === group.id ? "Collapse" : "Edit Options"}
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => openEdit(group)}>
+                <Button variant="ghost" size="sm" onClick={() => openEdit(group)} aria-label={`Edit ${group.name}`}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -394,9 +315,9 @@ export default function ModifiersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {group.options.map((opt) => {
+                {group.options.map((opt: ModifierOption) => {
                   const isEditing = editOption?.optionId === opt.id;
-                  return isEditing ? (
+                  return isEditing && editOption ? (
                     <TableRow key={opt.id}>
                       <TableCell><Input value={editOption.name} onChange={(e) => setEditOption({ ...editOption, name: e.target.value })} className="h-8 text-sm" /></TableCell>
                       <TableCell><Input type="number" step="0.01" value={editOption.price} onChange={(e) => setEditOption({ ...editOption, price: e.target.value })} className="h-8 text-sm w-20" /></TableCell>
@@ -413,15 +334,15 @@ export default function ModifiersPage() {
                     <TableRow key={opt.id}>
                       <TableCell className="font-medium">{opt.name}</TableCell>
                       <TableCell className="text-sm">{formatPrice(opt.priceDeltaAmount)}</TableCell>
-                      <TableCell>{opt.isDefault ? "✓" : ""}</TableCell>
+                      <TableCell>{opt.isDefault ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : ""}</TableCell>
                       <TableCell><Badge variant={opt.isActive ? "default" : "secondary"}>{opt.isActive ? "Active" : "Inactive"}</Badge></TableCell>
                       {expandedGroup === group.id && (
                         <TableCell className="text-right">
                           <div className="flex gap-1 justify-end">
-                            <Button variant="ghost" size="sm" onClick={() => setEditOption({ groupId: group.id, optionId: opt.id, name: opt.name, price: String(opt.priceDeltaAmount), isDefault: opt.isDefault, isActive: opt.isActive })}>
+                            <Button variant="ghost" size="sm" onClick={() => setEditOption({ groupId: group.id, optionId: opt.id, name: opt.name, price: String(opt.priceDeltaAmount), isDefault: opt.isDefault, isActive: opt.isActive })} aria-label={`Edit ${opt.name}`}>
                               <Pencil className="h-3 w-3" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteOption(opt.id)}>
+                            <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" onClick={() => setDeleteOptionId(opt.id)} aria-label={`Delete ${opt.name}`}>
                               <Trash2 className="h-3 w-3" />
                             </Button>
                           </div>
@@ -451,6 +372,16 @@ export default function ModifiersPage() {
           </CardContent>
         </Card>
       ))}
+
+      <ConfirmDialog
+        open={!!deleteOptionId}
+        onOpenChange={(open) => { if (!open) setDeleteOptionId(null); }}
+        title="Delete option"
+        description="Are you sure you want to delete this option? This action cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => { if (deleteOptionId) handleDeleteOption(deleteOptionId); }}
+      />
     </div>
   );
 }
