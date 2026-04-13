@@ -10,6 +10,18 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**.sslip.io"
+      },
+      {
+        protocol: "https",
+        hostname: "localhost"
+      }
+    ]
+  },
   async rewrites() {
     if (!apiProxyTarget) {
       return [];

@@ -1586,7 +1586,9 @@ function getHomeFeaturedItems(categories: Category[]) {
           product.variants[0]?.priceAmount ??
           0,
         highlight:
-          product.modifierGroups.length > 0 ? "Customisable" : "Ready-made favourite"
+          product.modifierGroups.length > 0 ? "Customisable" : "Ready-made favourite",
+        imageUrl: product.imageUrl,
+        imageAlt: product.imageAltText || product.name
       }))
   );
 
@@ -1606,7 +1608,9 @@ function getHomeFeaturedItems(categories: Category[]) {
         product.variants[0]?.priceAmount ??
         0,
       highlight:
-        product.modifierGroups.length > 0 ? "Customisable" : "Ready-made favourite"
+        product.modifierGroups.length > 0 ? "Customisable" : "Ready-made favourite",
+      imageUrl: product.imageUrl,
+      imageAlt: product.imageAltText || product.name
     }))
   );
 

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { Product, ProductSelectionState } from "./catalog";
 
 type ProductCardProps = {
@@ -24,6 +25,17 @@ export function ProductCard({
 
   return (
     <article className="product-card" role="group" aria-label={product.name}>
+      {product.imageUrl ? (
+        <div className="product-card-image">
+          <Image
+            src={product.imageUrl}
+            alt={product.imageAltText || product.name}
+            fill
+            sizes="64px"
+            className="product-card-img"
+          />
+        </div>
+      ) : null}
       <div className="product-card-copy">
         <div className="product-card-top">
           <div>

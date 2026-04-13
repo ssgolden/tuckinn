@@ -1,3 +1,6 @@
+import Image from "next/image";
+import type { Product } from "./catalog";
+
 type FeaturedItem = {
   id: string;
   categoryName: string;
@@ -5,6 +8,8 @@ type FeaturedItem = {
   description: string;
   price: string;
   highlight: string;
+  imageUrl?: string | null;
+  imageAlt?: string | null;
   onOpen: () => void;
 };
 
@@ -23,6 +28,17 @@ export function FeaturedGrid({ items }: FeaturedGridProps) {
           onClick={item.onOpen}
           aria-label={`${item.productName} - ${item.price}, ${item.highlight}`}
         >
+          {item.imageUrl ? (
+            <div className="featured-card-image">
+              <Image
+                src={item.imageUrl}
+                alt={item.imageAlt || item.productName}
+                fill
+                sizes="120px"
+                className="featured-card-img"
+              />
+            </div>
+          ) : null}
           <span className="featured-card-kicker">{item.categoryName}</span>
           <strong>{item.productName}</strong>
           <p>{item.description}</p>
