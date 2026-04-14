@@ -192,6 +192,16 @@ model Location {
   region        String?
   postalCode    String?         @map("postal_code")
   countryCode   String?         @map("country_code")
+
+  // Business settings
+  openingHours            Json    @default("{}") @map("opening_hours")
+  taxRate                Decimal @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  deliveryFee            Decimal @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  minimumDeliveryOrder   Decimal @default(0) @map("minimum_delivery_order") @db.Decimal(10, 2)
+  orderingCutoffMinutes  Int     @default(0) @map("ordering_cutoff_minutes")
+  isOnlineOrderingEnabled Boolean @default(true) @map("is_online_ordering_enabled")
+  deliveryRadiusKm       Int?    @map("delivery_radius_km")
+
   createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz
   tables        DiningTable[]

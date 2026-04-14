@@ -8,9 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,13 +16,6 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -46,6 +36,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 
 type OrderItem = { name: string; quantity: number; unitPrice: number };
@@ -111,6 +102,7 @@ function formatPrice(amount: number) {
 
 export default function OrdersPage() {
   const { session, updateSession } = useAuth();
+  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +111,7 @@ export default function OrdersPage() {
   const [dateRange, setDateRange] = useState<"all" | "today" | "7d" | "30d">("all");
   const [page, setPage] = useState(1);
   const ordersPerPage = 25;
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
   const [advancing, setAdvancing] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -164,9 +156,6 @@ export default function OrdersPage() {
       );
       toast.success(`Order moved to ${next.status.replace(/_/g, " ")}`);
       await loadOrders();
-      setSelectedOrder((prev) =>
-        prev && prev.id === orderId ? { ...prev, status: next.status } : prev
-      );
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Status update failed");
     } finally {
@@ -291,7 +280,7 @@ export default function OrdersPage() {
                       <Card
                         key={order.id}
                         className="cursor-pointer bg-[#111] border-border/40 hover:border-border transition-colors"
-                        onClick={() => setSelectedOrder(order)}
+                        onClick={() => router.push(`/orders/${order.id}`)}
                       >
                         <CardContent className="pt-4 space-y-3">
                           {/* Order header */}
@@ -395,83 +384,6 @@ export default function OrdersPage() {
           </div>
         )}
       </div>
-
-      {/* Order detail dialog */}
-      <Dialog open={!!selectedOrder} onOpenChange={(open) => !open && setSelectedOrder(null)}>
-        <DialogContent className="bg-[#111] border-border/50 max-w-md" aria-modal="true">
-          {selectedOrder && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <ClipboardList className="h-5 w-5" />
-                  Order #{selectedOrder.orderNumber}
-                </DialogTitle>
-                <DialogDescription>
-                  {new Date(selectedOrder.createdAt).toLocaleString()} &middot; {selectedOrder.orderKind}
-                  {selectedOrder.table && ` \u00B7 Table ${selectedOrder.table.name || selectedOrder.table.tableNumber}`}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4 pt-2">
-                {/* Status badge */}
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Status</span>
-                  <span
-                    className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                      STATUS_COLORS[selectedOrder.status] || "bg-stone-500/20 text-stone-400 border-stone-500/30"
-                    }`}
-                  >
-                    {selectedOrder.status.replace(/_/g, " ")}
-                  </span>
-                </div>
-
-                {/* Customer */}
-                {selectedOrder.customerName && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Customer</span>
-                    <span className="text-sm font-medium">{selectedOrder.customerName}</span>
-                  </div>
-                )}
-
-                {/* Items */}
-                <div className="space-y-1.5">
-                  <span className="text-sm font-medium">Items</span>
-                  {selectedOrder.items?.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">
-                        {item.quantity}x {item.name}
-                      </span>
-                      <span>{formatPrice(item.quantity * item.unitPrice)}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Total */}
-                <div className="flex items-center justify-between border-t border-border/50 pt-2">
-                  <span className="text-sm font-semibold">Total</span>
-                  <span className="text-lg font-bold">{formatPrice(selectedOrder.totalAmount)}</span>
-                </div>
-
-                {/* Advance status button */}
-                {NEXT_STATUS[selectedOrder.status] && (
-                  <Button
-                    className="w-full"
-                    disabled={advancing === selectedOrder.id}
-                    onClick={() => advanceOrder(selectedOrder.id, selectedOrder.status)}
-                  >
-                    {advancing === selectedOrder.id ? (
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <ArrowRight className="h-4 w-4 mr-2" />
-                    )}
-                    {NEXT_STATUS[selectedOrder.status].label}
-                  </Button>
-                )}
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

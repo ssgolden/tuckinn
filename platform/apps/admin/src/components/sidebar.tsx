@@ -18,6 +18,7 @@ import {
   Menu,
   FolderOpen,
   ShoppingBag,
+  MapPin,
   SlidersHorizontal,
   Home,
   ChevronRight,
@@ -75,6 +76,7 @@ const NAV: NavGroup[] = [
     icon: Settings,
     children: [
       { label: "Profile", href: "/settings/profile", icon: User },
+      { label: "Business", href: "/settings/business", icon: MapPin },
       { label: "Webhooks", href: "/settings/webhooks", icon: Webhook },
     ],
   },
@@ -93,6 +95,7 @@ const BREADCRUMB_MAP: Record<string, string> = {
   notifications: "Notifications",
   settings: "Settings",
   profile: "Profile",
+  business: "Business",
   webhooks: "Webhooks",
 };
 

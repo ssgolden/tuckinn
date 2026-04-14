@@ -20,6 +20,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { RealtimeModule } from "./realtime/realtime.module";
+import { SettingsModule } from "./settings/settings.module";
 
 @Module({
   imports: [
@@ -42,7 +43,8 @@ import { RealtimeModule } from "./realtime/realtime.module";
     MediaModule,
     WebhooksModule,
     NotificationsModule,
-    AnalyticsModule
+    AnalyticsModule,
+    SettingsModule
   ],
   controllers: [HealthController, ReadinessController]
 })
