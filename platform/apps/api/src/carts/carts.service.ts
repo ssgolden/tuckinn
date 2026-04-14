@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException
 } from "@nestjs/common";
 import { ProductStatus } from "../../src/generated/prisma/index.js";
 import { fromMinorUnits, toMinorUnits, toDisplayAmount } from "../common/money.utils";
 import { PrismaService } from "../prisma/prisma.service";
+import type { AuthenticatedUser } from "../auth/auth.types";
 import { AddCartItemDto } from "./dto/add-cart-item.dto";
 import { CreateCartDto } from "./dto/create-cart.dto";
 import { UpdateCartItemDto } from "./dto/update-cart-item.dto";
@@ -14,7 +16,7 @@ import { UpdateCartItemDto } from "./dto/update-cart-item.dto";
 export class CartsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createCart(dto: CreateCartDto) {
+  async createCart(dto: CreateCartDto, user?: AuthenticatedUser) {
     const location = await this.prisma.location.findUnique({
       where: { code: dto.locationCode }
     });
@@ -44,20 +46,24 @@ export class CartsService {
       data: {
         locationId: location.id,
         diningTableId,
-        currencyCode: location.currencyCode
+        currencyCode: location.currencyCode,
+        // Link cart to authenticated customer if present
+        ...(user ? { customerUserId: user.sub } : {})
       }
     });
 
-    return this.getCart(cart.id);
+    return this.getCart(cart.id, user);
   }
 
-  async getCart(cartId: string) {
+  async getCart(cartId: string, user?: AuthenticatedUser) {
     const cart = await this.loadCartOrThrow(cartId);
+    this.verifyOwnership(cart, user);
     return this.formatCart(cart);
   }
 
-  async addItem(cartId: string, dto: AddCartItemDto) {
+  async addItem(cartId: string, dto: AddCartItemDto, user?: AuthenticatedUser) {
     const cart = await this.loadCartOrThrow(cartId);
+    this.verifyOwnership(cart, user);
     this.ensureCartIsEditable(cart.status);
 
     const resolvedItem = await this.resolveItemSelection({
@@ -99,11 +105,12 @@ export class CartsService {
       await this.recalculateCart(cartId, tx);
     });
 
-    return this.getCart(cartId);
+    return this.getCart(cartId, user);
   }
 
-  async updateItem(cartId: string, itemId: string, dto: UpdateCartItemDto) {
+  async updateItem(cartId: string, itemId: string, dto: UpdateCartItemDto, user?: AuthenticatedUser) {
     const cart = await this.loadCartOrThrow(cartId);
+    this.verifyOwnership(cart, user);
     this.ensureCartIsEditable(cart.status);
 
     const existingItem = await this.prisma.cartItem.findFirst({
@@ -170,11 +177,12 @@ export class CartsService {
       await this.recalculateCart(cartId, tx);
     });
 
-    return this.getCart(cartId);
+    return this.getCart(cartId, user);
   }
 
-  async removeItem(cartId: string, itemId: string) {
+  async removeItem(cartId: string, itemId: string, user?: AuthenticatedUser) {
     const cart = await this.loadCartOrThrow(cartId);
+    this.verifyOwnership(cart, user);
     this.ensureCartIsEditable(cart.status);
 
     const item = await this.prisma.cartItem.findFirst({
@@ -195,10 +203,10 @@ export class CartsService {
       await this.recalculateCart(cartId, tx);
     });
 
-    return this.getCart(cartId);
+    return this.getCart(cartId, user);
   }
 
-  async deleteCart(cartId: string) {
+  async deleteCart(cartId: string, user?: AuthenticatedUser) {
     const cart = await this.prisma.cart.findUnique({
       where: { id: cartId }
     });
@@ -206,6 +214,8 @@ export class CartsService {
     if (!cart) {
       throw new NotFoundException("Cart not found.");
     }
+
+    this.verifyOwnership(cart, user);
 
     await this.prisma.cartItem.deleteMany({
       where: { cartId }
@@ -216,6 +226,28 @@ export class CartsService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Verify that the authenticated user (if any) is the owner of the cart.
+   *
+   * Rules:
+   * - No authenticated user → allow (guest cart, UUID provides unguessability)
+   * - Authenticated user + cart has no owner → allow (guest cart accessed by logged-in user)
+   * - Authenticated user + cart has an owner → user must match the owner
+   */
+  private verifyOwnership(
+    cart: { customerUserId: string | null },
+    user?: AuthenticatedUser
+  ): void {
+    if (!user) {
+      // Anonymous request — rely on UUID opacity to prevent enumeration
+      return;
+    }
+
+    if (cart.customerUserId && cart.customerUserId !== user.sub) {
+      throw new ForbiddenException("You do not have access to this cart.");
+    }
   }
 
   private ensureCartIsEditable(status: string) {

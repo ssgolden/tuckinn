@@ -39,6 +39,7 @@
     "stripe": "^22.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@nestjs/cli": "^10.4.9",
     "@nestjs/schematics": "^10.2.3",
     "@nestjs/testing": "^10.4.15",
@@ -48,6 +49,9 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.15.5",
+    "eslint": "^10.2.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
     "jest": "^29.7.0",
     "prisma": "^6.19.3",
     "ts-jest": "^29.2.5",
