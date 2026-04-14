@@ -81,30 +81,30 @@ const catalogSeed: SeedCategory[] = [
     sortOrder: 1,
     products: [
       {
-        slug: "option-1",
-        name: "Option 1",
+        slug: "meal-deal-lite",
+        name: "Meal Deal Lite",
         shortDescription: "Premium sandwich, canned drink, chocolate, and crisps.",
         price: "9.95",
         sortOrder: 1,
         isFeatured: true
       },
       {
-        slug: "option-2",
-        name: "Option 2",
+        slug: "meal-deal-classic",
+        name: "Meal Deal Classic",
         shortDescription: "Deluxe sandwich, canned drink, and two snack items.",
         price: "13.95",
         sortOrder: 2
       },
       {
-        slug: "option-3",
-        name: "Option 3",
+        slug: "meal-deal-feast",
+        name: "Meal Deal Feast",
         shortDescription: "Two premium sandwiches, two canned drinks, and four snack items.",
         price: "19.95",
         sortOrder: 3
       },
       {
-        slug: "option-4-mega",
-        name: "Option 4 Mega",
+        slug: "meal-deal-mega",
+        name: "Meal Deal Mega",
         shortDescription: "Four premium sandwiches, four drinks, eight snacks, and four beers.",
         price: "39.95",
         sortOrder: 4
