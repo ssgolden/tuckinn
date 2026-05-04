@@ -1,3 +1,9 @@
+# Global options
+{
+	# Email for Let's Encrypt account / ACME notifications
+	email stephen@rido.bike
+}
+
 (security_headers) {
 	header {
 		# Prevent MIME type sniffing
@@ -19,15 +25,49 @@
 	}
 }
 
+# ─── Public domain (Let's Encrypt) ───────────────────────────
+# Apex + www → storefront
+tuckinnproper.com, www.tuckinnproper.com {
+	encode gzip zstd
+	reverse_proxy storefront:3000
+	import security_headers
+}
+
+admin.tuckinnproper.com {
+	encode gzip zstd
+	reverse_proxy admin:3000
+	import security_headers
+}
+
+staff.tuckinnproper.com {
+	encode gzip zstd
+	reverse_proxy staff:3000
+	import security_headers
+}
+
+api.tuckinnproper.com {
+	encode gzip zstd
+	import security_headers
+
+	# Restrict Swagger/API docs to internal network only
+	@api_docs path /api/docs* /api/swagger* /api-json /api-json*
+	handle @api_docs {
+		@internal not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/8
+		respond @internal 403 {
+			close
+		}
+		reverse_proxy api:3200
+	}
+
+	reverse_proxy api:3200
+}
+
+# ─── Internal sslip.io domains (self-signed) ─────────────────
+# Kept so existing internal links keep working.
 {$STORE_DOMAIN} {
 	encode gzip zstd
 	reverse_proxy storefront:3000
 	import security_headers
-
-	# sslip.io domains cannot auto-provision Let's Encrypt certs.
-	# For development: use self-signed (below)
-	# For production: remove "tls internal" and configure explicit certs, e.g.:
-	#   tls /etc/certs/store.crt /etc/certs/store.key
 	tls internal
 }
 
@@ -49,7 +89,6 @@
 	encode gzip zstd
 	import security_headers
 
-	# Restrict Swagger/API docs to internal network only
 	@api_docs path /api/docs* /api/swagger* /api-json /api-json*
 	handle @api_docs {
 		@internal not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/8
