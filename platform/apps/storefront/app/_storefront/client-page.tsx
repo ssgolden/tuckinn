@@ -346,14 +346,21 @@ export default function StorefrontHomePage() {
         setBuilderProductId(firstBuilder.id);
       }
 
-      const storedCartId = loadStoredCartId();
-      if (storedCartId) {
-        try {
-          const existingCart = await apiFetch<CartResponse>(`/carts/${storedCartId}`);
-          setCart(existingCart);
-          setCartId(existingCart.id);
-        } catch {
-          clearStoredCartId();
+      // If the customer arrived via a table QR, start with a clean basket.
+      // Otherwise customers sharing a device (or returning to the same
+      // table) inherit each other's items.
+      if (qrSlug) {
+        clearStoredCartId();
+      } else {
+        const storedCartId = loadStoredCartId();
+        if (storedCartId) {
+          try {
+            const existingCart = await apiFetch<CartResponse>(`/carts/${storedCartId}`);
+            setCart(existingCart);
+            setCartId(existingCart.id);
+          } catch {
+            clearStoredCartId();
+          }
         }
       }
 
@@ -613,7 +620,9 @@ export default function StorefrontHomePage() {
           customerEmail: checkoutForm.customerEmail || undefined,
           customerPhone: checkoutForm.customerPhone || undefined,
           specialInstructions: checkoutForm.specialInstructions || undefined,
-          ...(tableSlug ? { diningTableQrSlug: tableSlug } : {}),
+          // The table is already attached to the cart at create time, so we
+          // don't pass diningTableQrSlug here — the StartCheckoutDto rejects
+          // unknown properties.
           ...(deliveryAddress ? { deliveryAddress } : {})
         })
       });
