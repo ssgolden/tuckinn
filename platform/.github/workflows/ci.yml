@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel in-progress runs for the same ref when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: platform
+
+jobs:
+  test:
+    name: Typecheck + tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_DB: tuckinn_platform
+          POSTGRES_USER: tuckinn
+          POSTGRES_PASSWORD: tuckinn-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tuckinn -d tuckinn_platform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://tuckinn:tuckinn-ci@localhost:5432/tuckinn_platform?schema=public
+      # CI uses ephemeral secrets — never reuse these in any other env.
+      JWT_ACCESS_SECRET: ci-only-not-a-real-secret-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      JWT_REFRESH_SECRET: ci-only-not-a-real-secret-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      SESSION_SECRET: ci-only-not-a-real-secret-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.8.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: platform/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Apply migrations + push schema (CI only)
+        # `db push` to apply the latest schema, including any not-yet-migrated
+        # additions. Safer than relying on migrate deploy in CI where we want
+        # to test the current code, not historical migrations.
+        run: pnpm db:push --skip-generate
+
+      - name: Typecheck — API
+        run: pnpm --filter @tuckinn/api typecheck
+
+      - name: Typecheck — admin
+        run: pnpm --filter @tuckinn/admin typecheck
+
+      - name: API unit tests
+        run: pnpm --filter @tuckinn/api test
+
+      - name: Build — API
+        run: pnpm --filter @tuckinn/api build
+
+      - name: Build — storefront
+        run: pnpm --filter @tuckinn/storefront build
+
+      - name: Build — admin
+        run: pnpm --filter @tuckinn/admin build
+
+      - name: Build — staff
+        run: pnpm --filter @tuckinn/staff build
