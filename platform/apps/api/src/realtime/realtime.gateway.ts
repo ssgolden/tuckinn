@@ -7,6 +7,7 @@ import {
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import { ConfigService } from "@nestjs/config";
+import { getJwtSecret } from "../auth/jwt-secret.util";
 
 import jwt from "jsonwebtoken";
 
@@ -48,8 +49,7 @@ export class RealtimeGateway
     }
 
     try {
-      const accessSecret =
-        this.configService.get<string>("JWT_ACCESS_SECRET") || "replace-me";
+      const accessSecret = getJwtSecret(this.configService, "JWT_ACCESS_SECRET");
       const payload = jwt.verify(token, accessSecret) as {
         sub: string;
         roles: string[];

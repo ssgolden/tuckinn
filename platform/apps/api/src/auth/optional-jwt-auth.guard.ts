@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { AuthenticatedUser } from "./auth.types";
+import { getJwtSecret } from "./jwt-secret.util";
 
 type RequestWithUser = {
   headers: {
@@ -44,7 +45,7 @@ export class OptionalJwtAuthGuard implements CanActivate {
     try {
       const payload = jwt.verify(
         token,
-        this.configService.get<string>("JWT_ACCESS_SECRET") || "replace-me"
+        getJwtSecret(this.configService, "JWT_ACCESS_SECRET")
       ) as AuthenticatedUser;
       request.user = payload;
     } catch {

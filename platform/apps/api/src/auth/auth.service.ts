@@ -19,6 +19,7 @@ import type { AuthenticatedUser, TokenPair } from "./auth.types";
 import { ChangePasswordDto } from "./dto/change-password.dto";
 import { CustomerRegisterDto } from "./dto/customer-register.dto";
 import { LoginDto } from "./dto/login.dto";
+import { getJwtSecret } from "./jwt-secret.util";
 
 import jwt from "jsonwebtoken";
 
@@ -333,8 +334,8 @@ export class AuthService {
   }
 
   private async issueTokens(payload: AuthenticatedUser): Promise<TokenPair> {
-    const accessSecret = this.configService.get<string>("JWT_ACCESS_SECRET") || "replace-me";
-    const refreshSecret = this.configService.get<string>("JWT_REFRESH_SECRET") || "replace-me";
+    const accessSecret = getJwtSecret(this.configService, "JWT_ACCESS_SECRET");
+    const refreshSecret = getJwtSecret(this.configService, "JWT_REFRESH_SECRET");
 
     const [accessToken, refreshToken] = await Promise.all([
       Promise.resolve(
@@ -356,7 +357,7 @@ export class AuthService {
     try {
       return jwt.verify(
         refreshToken,
-        this.configService.get<string>("JWT_REFRESH_SECRET") || "replace-me"
+        getJwtSecret(this.configService, "JWT_REFRESH_SECRET")
       ) as AuthenticatedUser;
     } catch {
       throw new UnauthorizedException("Refresh token is invalid.");
