@@ -11,8 +11,15 @@
   --primary-shadow: 0 10px 30px rgba(255, 59, 59, 0.4);
   --primary-shadow-subtle: 0 8px 25px rgba(255, 59, 59, 0.3);
 
-  /* Accent colours */
-  --accent: #111111;
+  /* Accent colours.
+     --accent is used for small uppercase kickers (.section-kicker,
+     .social-proof-kicker, .route-tag) which sit on dark backgrounds —
+     so it must have high contrast against --bg / --bg-card. The previous
+     value #111111 rendered as near-black on near-black, making the
+     "Signature builder" / "Proper favourites" / "Direct ordering"
+     labels (and similar small caps text) invisible. Use the brand gold
+     instead, which is also distinct from --primary (red). */
+  --accent: #FFC107;
   --accent-soft: rgba(255, 255, 255, 0.05);
   --gold: #FFC107;
   --gold-gradient: linear-gradient(135deg, #FFD700, #FFA500);
