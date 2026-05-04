@@ -250,9 +250,14 @@ export class AuthService {
 
     const token = resetSession.id;
 
-    // TODO: Send email with reset link containing the token
-    // For now, log the token for development purposes
-    console.log(`[Password Reset] Token for ${email}: ${token}`);
+    // TODO: Send email with reset link containing the token.
+    // Until the email channel is wired up, surface the token in dev logs
+    // ONLY — never in production, where this would expose an
+    // account-takeover primitive to anyone with log access.
+    if (process.env.NODE_ENV !== "production") {
+      // eslint-disable-next-line no-console
+      console.log(`[Password Reset] Token for ${email}: ${token}`);
+    }
 
     return { success: true };
   }
