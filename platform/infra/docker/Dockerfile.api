@@ -22,8 +22,12 @@ RUN pnpm install --frozen-lockfile=false
 # Copy Prisma schema
 COPY prisma prisma
 
-# Copy full source (including pre-generated prisma client)
+# Copy full source
 COPY . .
+
+# Generate Prisma Client (apps/api/src/generated/prisma is gitignored — must
+# be produced inside the build container before tsc runs).
+RUN pnpm db:generate
 
 # Build the NestJS API
 RUN pnpm --filter @tuckinn/api build
