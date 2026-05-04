@@ -21,7 +21,17 @@ chmod -R 775 /app/data/uploads 2>/dev/null || true
 log info "Dropping privileges to appuser (uid 1001)"
 export HOME=/home/appuser
 
-# --- Execute as appuser ---
+# If the container was given an explicit command (e.g. `compose run --rm api
+# prisma migrate deploy`), pass it through directly under appuser. This lets
+# the deploy script run a one-shot migration without the entrypoint also
+# starting the long-running API server.
+#
+# When no command is passed, we run the default boot sequence: migrations
+# → optional seed → start API.
+if [ "$#" -gt 0 ]; then
+  exec gosu appuser:appgroup "$@"
+fi
+
 exec gosu appuser:appgroup /bin/sh -c '
   set -e
   LOG_LEVEL="${LOG_LEVEL:-info}"
