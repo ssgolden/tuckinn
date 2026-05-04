@@ -24,6 +24,8 @@ const REQUIRED_IN_PRODUCTION: Array<{
   { key: "STORE_DOMAIN", label: "Storefront domain", warnOnly: true },
 ];
 
+const REQUIRED_ALWAYS = new Set(["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"]);
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -58,6 +60,25 @@ export class AppConfigModule implements OnModuleInit {
         const msg = `${label} (${key}) uses a dangerous default value. Generate a real secret before deploying.`;
         if (warnOnly) warnings.push(msg); else errors.push(msg);
       }
+    }
+
+    const alwaysRequiredErrors: string[] = [];
+    for (const { key, label } of REQUIRED_IN_PRODUCTION) {
+      if (!REQUIRED_ALWAYS.has(key)) continue;
+      const value = this.configService.get<string>(key);
+      if (!value) {
+        alwaysRequiredErrors.push(`Missing ${label} (${key}).`);
+      } else if (DANGEROUS_DEFAULTS.some(d => value.includes(d))) {
+        alwaysRequiredErrors.push(
+          `${label} (${key}) uses a dangerous default value. Generate a real secret (e.g. \`openssl rand -hex 64\`).`
+        );
+      }
+    }
+
+    if (alwaysRequiredErrors.length > 0) {
+      throw new Error(
+        `Security check failed. JWT secrets must be set in every environment:\n${alwaysRequiredErrors.map(e => `  - ${e}`).join("\n")}`
+      );
     }
 
     if (isProduction && errors.length > 0) {

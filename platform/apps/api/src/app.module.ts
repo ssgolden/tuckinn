@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { APP_GUARD } from "@nestjs/core";
+import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { HealthController, ReadinessController } from "./common/health.controller";
 import { AppConfigModule } from "./config/app-config.module";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -46,6 +47,9 @@ import { SettingsModule } from "./settings/settings.module";
     AnalyticsModule,
     SettingsModule
   ],
-  controllers: [HealthController, ReadinessController]
+  controllers: [HealthController, ReadinessController],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard }
+  ]
 })
 export class AppModule {}
