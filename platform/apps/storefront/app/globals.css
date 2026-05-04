@@ -249,6 +249,10 @@ body {
 }
 .brand-logo {
   position: relative;
+  /* flex-shrink:0 prevents the 56×56 logo box from being squished
+     horizontally when the parent .header-brand flex row runs out of
+     room on narrow viewports (e.g. Samsung S25 at 412px). */
+  flex: 0 0 56px;
   width: 56px; height: 56px;
   border-radius: 16px;
   overflow: hidden;
@@ -726,6 +730,7 @@ body {
 }
 .hero-brand-mark {
   position: relative;
+  flex: 0 0 104px;
   width: 104px;
   height: 104px;
   border-radius: 22px;
