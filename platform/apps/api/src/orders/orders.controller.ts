@@ -33,9 +33,19 @@ export class OrdersController {
     @Query("locationCode") locationCode?: string,
     @Query("status") status?: OrderStatus,
     @Query("scope") scope?: "active" | "history" | "all",
-    @Query("orderKind") orderKind?: OrderType
+    @Query("orderKind") orderKind?: OrderType,
+    @Query("cursor") cursor?: string,
+    @Query("limit") limit?: string
   ) {
-    return this.ordersService.listOrders({ locationCode, status, scope, orderKind });
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : undefined;
+    return this.ordersService.listOrders({
+      locationCode,
+      status,
+      scope,
+      orderKind,
+      cursor,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined
+    });
   }
 
   @Get(":orderId")

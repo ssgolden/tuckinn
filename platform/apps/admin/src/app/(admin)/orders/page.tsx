@@ -118,12 +118,12 @@ export default function OrdersPage() {
   const loadOrders = useCallback(async () => {
     if (!session) return;
     try {
-      const data = await apiFetch<Order[]>(
+      const result = await apiFetch<{ data: Order[]; nextCursor: string | null; pageSize: number }>(
         `/orders?limit=50`,
         undefined,
         session.accessToken
       );
-      setOrders(data);
+      setOrders(result.data);
       setError(null);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to load orders";

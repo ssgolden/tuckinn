@@ -9,6 +9,9 @@ import { PrismaService } from "../prisma/prisma.service";
 
 type OrderScope = "active" | "history" | "all";
 
+const DEFAULT_ORDER_PAGE_SIZE = 50;
+const MAX_ORDER_PAGE_SIZE = 200;
+
 const ACTIVE_STATUSES: OrderStatus[] = [
   OrderStatus.paid,
   OrderStatus.accepted,
@@ -61,10 +64,16 @@ export class OrdersService {
     status?: OrderStatus;
     scope?: OrderScope;
     orderKind?: OrderType;
+    cursor?: string;
+    limit?: number;
   }) {
     const statuses = params.status
       ? [params.status]
       : this.getStatusesForScope(params.scope ?? "all");
+
+    // Cap the page size so a misbehaving client cannot ask for the whole table.
+    const requested = params.limit ?? DEFAULT_ORDER_PAGE_SIZE;
+    const take = Math.min(Math.max(requested, 1), MAX_ORDER_PAGE_SIZE);
 
     const orders = await this.prisma.order.findMany({
       where: {
@@ -85,10 +94,27 @@ export class OrdersService {
           : {})
       },
       include: this.orderInclude,
-      orderBy: [{ createdAt: "desc" }]
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      // +1 so we can detect whether there is a next page without a
+      // separate count() query.
+      take: take + 1,
+      ...(params.cursor
+        ? {
+            cursor: { id: params.cursor },
+            skip: 1
+          }
+        : {})
     });
 
-    return orders.map(order => this.formatOrder(order));
+    const hasMore = orders.length > take;
+    const page = hasMore ? orders.slice(0, take) : orders;
+    const nextCursor = hasMore ? page[page.length - 1].id : null;
+
+    return {
+      data: page.map(order => this.formatOrder(order)),
+      nextCursor,
+      pageSize: take
+    };
   }
 
   async getOrderById(orderId: string) {

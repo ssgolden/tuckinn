@@ -158,9 +158,44 @@ describe("OrdersService", () => {
 
       const result = await service.listOrders({});
 
-      expect(result).toHaveLength(1);
+      expect(result.data).toHaveLength(1);
+      expect(result.nextCursor).toBeNull();
+      expect(result.pageSize).toBe(50);
       const where = prisma.order.findMany.mock.calls[0][0].where;
       expect(where.status.in).toEqual(Object.values(OrderStatus));
+    });
+
+    it("paginates with cursor + nextCursor when more results exist", async () => {
+      // Mock returns take+1 items so the service knows there's a next page
+      const orders = Array.from({ length: 51 }, (_, i) => ({
+        ...sampleOrder,
+        id: `order-${i + 1}`,
+        orderNumber: `TK-${i + 1}`
+      }));
+      prisma.order.findMany.mockResolvedValue(orders);
+
+      const result = await service.listOrders({ limit: 50 });
+
+      expect(result.data).toHaveLength(50);
+      expect(result.nextCursor).toBe("order-50");
+      const args = prisma.order.findMany.mock.calls[0][0];
+      expect(args.take).toBe(51);
+      expect(args.cursor).toBeUndefined();
+    });
+
+    it("clamps limit to MAX_ORDER_PAGE_SIZE", async () => {
+      prisma.order.findMany.mockResolvedValue([]);
+      const result = await service.listOrders({ limit: 9999 });
+      expect(result.pageSize).toBe(200);
+    });
+
+    it("uses cursor + skip when paging forward", async () => {
+      prisma.order.findMany.mockResolvedValue([sampleOrder]);
+      await service.listOrders({ cursor: "order-50", limit: 25 });
+      const args = prisma.order.findMany.mock.calls[0][0];
+      expect(args.cursor).toEqual({ id: "order-50" });
+      expect(args.skip).toBe(1);
+      expect(args.take).toBe(26);
     });
 
     it("filters by active scope", async () => {
