@@ -16,8 +16,10 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		# Permissions policy - restrict browser features
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
-		# Content Security Policy
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+		# Content Security Policy.
+		# style-src + font-src include fonts.googleapis.com / fonts.gstatic.com
+		# so Material Icons + Google Fonts load on the storefront.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
 		# HSTS - enforce HTTPS for 1 year (enable after confirming HTTPS works)
 		# Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		# Remove server header
@@ -62,42 +64,8 @@ api.tuckinnproper.com {
 	reverse_proxy api:3200
 }
 
-# ─── Internal sslip.io domains (self-signed) ─────────────────
-# Kept so existing internal links keep working.
-{$STORE_DOMAIN} {
-	encode gzip zstd
-	reverse_proxy storefront:3000
-	import security_headers
-	tls internal
-}
-
-{$ADMIN_DOMAIN} {
-	encode gzip zstd
-	reverse_proxy admin:3000
-	import security_headers
-	tls internal
-}
-
-{$STAFF_DOMAIN} {
-	encode gzip zstd
-	reverse_proxy staff:3000
-	import security_headers
-	tls internal
-}
-
-{$API_DOMAIN} {
-	encode gzip zstd
-	import security_headers
-
-	@api_docs path /api/docs* /api/swagger* /api-json /api-json*
-	handle @api_docs {
-		@internal not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/8
-		respond @internal 403 {
-			close
-		}
-		reverse_proxy api:3200
-	}
-
-	reverse_proxy api:3200
-	tls internal
-}
+# Note: previously had {$STORE_DOMAIN}/{$ADMIN_DOMAIN}/{$STAFF_DOMAIN}/{$API_DOMAIN}
+# fallback blocks for sslip.io domains. Those env vars now point at the real
+# tuckinnproper.com domains (used by the Next.js apps as build-time
+# NEXT_PUBLIC_* values), so the fallback blocks would collide with the
+# explicit blocks above. Removed.
