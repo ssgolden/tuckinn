@@ -774,6 +774,7 @@ function StripeCheckoutForm({
 
   return (
     <main className="storefront-app" aria-label={BRAND_NAME + " storefront"}>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       <div className="app-header-shell">
         <header className="app-header">
           <button type="button" className="header-brand" onClick={() => setView("home")} aria-label="Return to home">
@@ -810,6 +811,8 @@ function StripeCheckoutForm({
           </div>
         </header>
       </div>
+
+      <div id="main-content" tabIndex={-1} />
 
       {isDrawerOpen && (
         <div className="drawer-overlay" onClick={() => setIsDrawerOpen(false)} role="dialog" aria-modal="true" aria-label="Category navigation">
