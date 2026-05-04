@@ -3,6 +3,7 @@ import type { ConfigService } from "@nestjs/config";
 const DANGEROUS_DEFAULTS = new Set([
   "replace-me",
   "replace-with-a-long-random-secret",
+  "replace-with-strong-random-secret",
   "dev-secret",
   "tuckinn-dev-secret-change-in-production",
   "ChangeMe123!"
