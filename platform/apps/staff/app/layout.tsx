@@ -20,8 +20,8 @@ export const metadata: Metadata = {
   description:
     "Track live Tuckinn Proper orders, update fulfillment statuses, and monitor the realtime staff board.",
   icons: {
-    icon: "/logo.jpg",
-    apple: "/logo.jpg"
+    icon: "/logo.svg",
+    apple: "/logo.svg"
   }
 };
 
