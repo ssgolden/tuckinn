@@ -21,8 +21,8 @@ export const metadata: Metadata = {
   description:
     "Order Tuckinn Proper favourites, meal deals, and custom sandwiches through a warmer, clearer branded storefront.",
   icons: {
-    icon: "/logo.jpg",
-    apple: "/logo.jpg"
+    icon: "/logo.svg",
+    apple: "/logo.svg"
   }
 };
 

@@ -432,7 +432,7 @@ export default function StaffHomePage() {
       <section style={styles.topBar}>
         <div style={styles.headerBrand}>
           <div style={styles.brandLogoFrame}>
-            <Image src="/logo.jpg" alt="Tuckinn Proper logo" fill sizes="88px" priority />
+            <Image src="/logo.svg" alt="Tuckinn Proper logo" fill sizes="88px" priority />
           </div>
           <div style={styles.headerLead}>
             <p style={styles.eyebrow}>Tuckinn Proper Staff</p>

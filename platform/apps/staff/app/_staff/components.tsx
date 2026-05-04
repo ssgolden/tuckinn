@@ -41,7 +41,7 @@ export function StaffAuthShell({
       <section style={styles.authCard}>
         <div style={styles.authBrand}>
           <div style={styles.brandLogoFrame}>
-            <Image src="/logo.jpg" alt="Tuckinn Proper logo" fill sizes="88px" priority />
+            <Image src="/logo.svg" alt="Tuckinn Proper logo" fill sizes="88px" priority />
           </div>
           <div>
             <p style={styles.eyebrow}>Tuckinn Proper Staff</p>

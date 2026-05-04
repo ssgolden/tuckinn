@@ -742,7 +742,7 @@ function StripeCheckoutForm({
           <header className="app-header">
             <div className="header-brand" style={{ cursor: "default" }}>
               <div className="brand-logo">
-                <Image src="/logo.jpg" alt={`${BRAND_NAME} logo`} fill sizes="56px" priority />
+                <Image src="/logo.svg" alt={`${BRAND_NAME} logo`} fill sizes="56px" priority />
               </div>
               <div className="header-brand-copy">
                 <strong>{BRAND_NAME}</strong>
@@ -769,7 +769,7 @@ function StripeCheckoutForm({
         <header className="app-header">
           <button type="button" className="header-brand" onClick={() => setView("home")} aria-label="Return to home">
             <div className="brand-logo">
-              <Image src="/logo.jpg" alt={`${BRAND_NAME} logo`} fill sizes="56px" priority />
+              <Image src="/logo.svg" alt={`${BRAND_NAME} logo`} fill sizes="56px" priority />
             </div>
             <div className="header-brand-copy">
               <strong>{BRAND_NAME}</strong>

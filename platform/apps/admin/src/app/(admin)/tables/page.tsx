@@ -215,7 +215,17 @@ export default function TablesPage() {
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
   }
 
-  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+  // QR codes must point at the public storefront, NOT the admin app.
+  // Resolution order: NEXT_PUBLIC_STOREFRONT_URL → strip "admin." from current origin → current origin (dev fallback).
+  const storefrontUrlFromEnv = process.env.NEXT_PUBLIC_STOREFRONT_URL?.replace(/\/$/, "");
+  const derivedFromAdminOrigin =
+    typeof window !== "undefined" && window.location.hostname.startsWith("admin.")
+      ? `${window.location.protocol}//${window.location.hostname.replace(/^admin\./, "")}`
+      : null;
+  const baseUrl =
+    storefrontUrlFromEnv ??
+    derivedFromAdminOrigin ??
+    (typeof window !== "undefined" ? window.location.origin : "");
 
   if (loading) {
     return (

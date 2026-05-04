@@ -42,7 +42,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md shadow-xl border-border/50 bg-[#111]">
         <CardHeader className="text-center space-y-3 pb-2">
           <div className="mx-auto w-20 h-20 relative rounded-xl overflow-hidden ring-2 ring-border/50">
-            <Image src="/logo.jpg" alt="Tuckinn Proper" fill className="object-cover" priority />
+            <Image src="/logo.svg" alt="Tuckinn Proper" fill className="object-cover" priority />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">
             Tuckinn Proper
