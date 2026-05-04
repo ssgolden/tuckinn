@@ -7,6 +7,7 @@ const platformRoot = resolve(__dirname, "../../../../");
 const DANGEROUS_DEFAULTS = [
   "replace-me",
   "replace-with-a-long-random-secret",
+  "replace-with-strong-random-secret",
   "dev-secret",
   "tuckinn-dev-secret-change-in-production",
   "ChangeMe123!",
