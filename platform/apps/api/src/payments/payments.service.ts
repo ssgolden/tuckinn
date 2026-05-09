@@ -5,7 +5,7 @@ import {
   ServiceUnavailableException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import {
   PaymentProvider,
   PaymentStatus,
@@ -15,126 +15,191 @@ import {
 import { fromMinorUnits, toDisplayAmount } from "../common/money.utils";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
-import Stripe from "stripe";
+import { SumUpClient } from "./sumup.client";
 
 @Injectable()
 export class PaymentsService {
-  private readonly stripe: InstanceType<typeof Stripe> | null;
+  private readonly sumUp: SumUpClient | null;
+  private readonly merchantCode: string | null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly realtimeGateway: RealtimeGateway
   ) {
-    const stripeSecretKey = this.configService.get<string>("STRIPE_SECRET_KEY");
-    this.stripe =
-      stripeSecretKey && stripeSecretKey !== "replace-me"
-        ? new Stripe(stripeSecretKey)
+    const apiKey = this.configService.get<string>("SUMUP_API_KEY");
+    this.merchantCode = this.configService.get<string>("SUMUP_MERCHANT_CODE") ?? null;
+    this.sumUp =
+      apiKey && apiKey !== "replace-me"
+        ? new SumUpClient(apiKey)
         : null;
   }
 
   ensureProviderConfigured(provider: PaymentProvider) {
-    if (provider !== PaymentProvider.stripe) {
-      throw new ServiceUnavailableException("Only Stripe is configured in this phase.");
+    if (provider !== PaymentProvider.sumup) {
+      throw new ServiceUnavailableException("Only SumUp is configured.");
     }
 
-    if (!this.stripe && !this.isMockPaymentsEnabled()) {
-      throw new ServiceUnavailableException("Stripe is not configured.");
+    if (!this.sumUp && !this.isMockPaymentsEnabled()) {
+      throw new ServiceUnavailableException("SumUp is not configured.");
     }
   }
 
-  async processStripeWebhook(rawBody: Buffer | string, signature?: string) {
-    if (!signature) {
-      throw new BadRequestException("Missing Stripe signature header.");
+  async processSumUpWebhook(rawBody: Buffer | string, signature?: string) {
+    const webhookSecret = this.configService.get<string>("SUMUP_WEBHOOK_SECRET");
+
+    if (webhookSecret && webhookSecret !== "replace-me" && signature) {
+      const expected = createHmac("sha256", webhookSecret)
+        .update(rawBody)
+        .digest("hex");
+      if (expected !== signature) {
+        throw new BadRequestException("Invalid SumUp webhook signature.");
+      }
     }
 
-    if (!this.stripe) {
-      throw new ServiceUnavailableException("Stripe is not configured.");
-    }
-
-    const webhookSecret = this.configService.get<string>("STRIPE_WEBHOOK_SECRET");
-    if (!webhookSecret || webhookSecret === "replace-me") {
-      throw new ServiceUnavailableException("Stripe webhook secret is not configured.");
-    }
-
-    let event: any;
+    const bodyStr = Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : rawBody;
+    let event: { event_type: string; id: string };
     try {
-      event = this.stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid Stripe webhook signature.";
-      throw new BadRequestException(message);
+      event = JSON.parse(bodyStr) as { event_type: string; id: string };
+    } catch {
+      throw new BadRequestException("Invalid SumUp webhook payload.");
     }
+
+    if (!event.id) {
+      throw new BadRequestException("Missing checkout id in SumUp webhook.");
+    }
+
+    const checkoutId = event.id;
 
     const existing = await this.prisma.webhookEvent.findUnique({
-      where: { eventId: event.id }
+      where: { eventId: checkoutId }
     });
 
     if (existing?.processedAt) {
-      return {
-        received: true,
-        duplicate: true
-      };
+      return { received: true, duplicate: true };
     }
 
     await this.prisma.webhookEvent.upsert({
-      where: { eventId: event.id },
+      where: { eventId: checkoutId },
       update: {
-        eventType: event.type,
-        payload: event,
+        eventType: event.event_type,
+        payload: JSON.parse(JSON.stringify(event)),
         processingError: null
       },
       create: {
-        provider: PaymentProvider.stripe,
-        eventId: event.id,
-        eventType: event.type,
-        payload: event
+        provider: PaymentProvider.sumup,
+        eventId: checkoutId,
+        eventType: event.event_type,
+        payload: JSON.parse(JSON.stringify(event))
       }
     });
 
     try {
-      switch (event.type) {
-        case "payment_intent.succeeded":
-        case "payment_intent.payment_failed":
-        case "payment_intent.canceled":
-        case "payment_intent.processing":
-        case "payment_intent.requires_action":
-        case "payment_intent.amount_capturable_updated":
-          await this.syncStripePaymentIntent(event.data.object, event.id, event.type);
-          break;
-        case "checkout.session.completed":
-          await this.handleCheckoutSessionCompleted(event.data.object, event.id);
-          break;
-        case "checkout.session.expired":
-          await this.handleCheckoutSessionExpired(event.data.object, event.id);
-          break;
-        default:
-          break;
+      if (event.event_type === "CHECKOUT_STATUS_CHANGED") {
+        await this.handleSumUpCheckoutStatusChanged(checkoutId);
       }
 
       await this.prisma.webhookEvent.update({
-        where: { eventId: event.id },
-        data: {
-          processedAt: new Date(),
-          processingError: null
-        }
+        where: { eventId: checkoutId },
+        data: { processedAt: new Date(), processingError: null }
       });
 
-      return {
-        received: true,
-        eventId: event.id,
-        eventType: event.type
-      };
+      return { received: true, checkoutId, eventType: event.event_type };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Stripe webhook processing failed.";
-
+      const message = error instanceof Error ? error.message : "SumUp webhook processing failed.";
       await this.prisma.webhookEvent.update({
-        where: { eventId: event.id },
+        where: { eventId: checkoutId },
+        data: { processingError: message }
+      });
+      throw error;
+    }
+  }
+
+  private async handleSumUpCheckoutStatusChanged(checkoutId: string) {
+    if (!this.sumUp) return;
+
+    const checkout = await this.sumUp.getCheckout(checkoutId);
+
+    const payment = await this.prisma.payment.findFirst({
+      where: { providerIntentId: checkoutId },
+      include: { order: true }
+    });
+
+    if (!payment) {
+      throw new NotFoundException(`No payment found for SumUp checkout ${checkoutId}.`);
+    }
+
+    const paymentStatus = this.mapSumUpStatus(checkout.status);
+    const orderStatus = this.mapOrderStatusFromPayment(paymentStatus);
+    const cartId =
+      payment.order.metadata &&
+      typeof payment.order.metadata === "object" &&
+      !Array.isArray(payment.order.metadata)
+        ? String((payment.order.metadata as Record<string, unknown>).cartId ?? "")
+        : "";
+
+    await this.prisma.$transaction(async tx => {
+      await tx.payment.update({
+        where: { id: payment.id },
         data: {
-          processingError: message
+          providerPaymentId: checkout.id,
+          status: paymentStatus,
+          amountCaptured:
+            paymentStatus === PaymentStatus.paid
+              ? fromMinorUnits(Math.round(checkout.amount * 100))
+              : null,
+          failureCode: paymentStatus === PaymentStatus.failed ? "sumup_failed" : null,
+          failureMessage: paymentStatus === PaymentStatus.failed ? "Payment declined by SumUp." : null,
+          metadata: JSON.parse(JSON.stringify(checkout))
         }
       });
 
-      throw error;
+      await tx.paymentEvent.create({
+        data: {
+          paymentId: payment.id,
+          provider: PaymentProvider.sumup,
+          eventType: "CHECKOUT_STATUS_CHANGED",
+          providerEventId: checkoutId,
+          payload: JSON.parse(JSON.stringify(checkout)),
+          processedAt: new Date()
+        }
+      });
+
+      if (orderStatus) {
+        await tx.order.update({
+          where: { id: payment.orderId },
+          data: {
+            status: orderStatus,
+            cancelledAt: orderStatus === OrderStatus.cancelled ? new Date() : null
+          }
+        });
+      }
+
+      if (cartId && paymentStatus === PaymentStatus.paid) {
+        await tx.cart.updateMany({
+          where: { id: cartId },
+          data: { status: CartStatus.converted }
+        });
+      }
+    });
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: payment.orderId },
+      select: { id: true, orderNumber: true, status: true }
+    });
+
+    if (order) {
+      this.realtimeGateway.emitOrderUpdated({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        source: "payments"
+      });
+      this.realtimeGateway.emitBoardRefresh({
+        source: "payments",
+        orderId: order.id,
+        status: order.status
+      });
     }
   }
 
@@ -170,9 +235,7 @@ export class PaymentsService {
         order: {
           include: {
             items: {
-              include: {
-                modifiers: true
-              },
+              include: { modifiers: true },
               orderBy: [{ createdAt: "asc" }]
             }
           }
@@ -183,13 +246,16 @@ export class PaymentsService {
     return payment ? this.formatCheckoutState(payment) : null;
   }
 
-  async createPendingPaymentRecord(input: {
-    orderId: string;
-    provider: PaymentProvider;
-    idempotencyKey: string;
-    currencyCode: string;
-  }, prisma: PrismaService | any = this.prisma) {
-    return prisma.payment.create({
+  async createPendingPaymentRecord(
+    input: {
+      orderId: string;
+      provider: PaymentProvider;
+      idempotencyKey: string;
+      currencyCode: string;
+    },
+    prisma: PrismaService | Parameters<Parameters<PrismaService["$transaction"]>[0]>[0] = this.prisma
+  ) {
+    return (prisma as PrismaService).payment.create({
       data: {
         orderId: input.orderId,
         provider: input.provider,
@@ -198,216 +264,6 @@ export class PaymentsService {
         currencyCode: input.currencyCode
       }
     });
-  }
-
-  async initializePayment(input: {
-    paymentId: string;
-    orderId: string;
-    orderNumber: string;
-    amountMinor: number;
-    currencyCode: string;
-    idempotencyKey: string;
-    customerEmail?: string;
-  }) {
-    if (!this.stripe) {
-      if (this.isMockPaymentsEnabled()) {
-        return this.initializeMockPayment(input);
-      }
-
-      throw new ServiceUnavailableException("Stripe is not configured.");
-    }
-
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: input.paymentId }
-    });
-
-    if (!payment) {
-      throw new NotFoundException("Payment record not found.");
-    }
-
-    try {
-      const paymentIntent = await this.stripe.paymentIntents.create(
-        {
-          amount: input.amountMinor,
-          currency: input.currencyCode.toLowerCase(),
-          automatic_payment_methods: {
-            enabled: true
-          },
-          receipt_email: input.customerEmail,
-          metadata: {
-            orderId: input.orderId,
-            orderNumber: input.orderNumber,
-            paymentId: input.paymentId
-          }
-        },
-        {
-          idempotencyKey: input.idempotencyKey
-        }
-      );
-
-      const updatedPayment = await this.prisma.payment.update({
-        where: { id: input.paymentId },
-        data: {
-          providerIntentId: paymentIntent.id,
-          providerPaymentId: paymentIntent.latest_charge
-            ? String(paymentIntent.latest_charge)
-            : null,
-          status: this.mapStripeStatus(paymentIntent.status),
-          amountAuthorized: fromMinorUnits(paymentIntent.amount),
-          amountCaptured:
-            paymentIntent.status === "succeeded"
-              ? fromMinorUnits(paymentIntent.amount_received)
-              : null,
-          metadata: JSON.parse(JSON.stringify(paymentIntent))
-        }
-      });
-
-      await this.prisma.paymentEvent.create({
-        data: {
-          paymentId: updatedPayment.id,
-          provider: PaymentProvider.stripe,
-          eventType: `payment_intent.${paymentIntent.status}`,
-          providerEventId: paymentIntent.id,
-          payload: JSON.parse(JSON.stringify(paymentIntent)),
-          processedAt: new Date()
-        }
-      });
-
-      return {
-        payment: updatedPayment,
-        clientSecret: paymentIntent.client_secret,
-        publishableKey:
-          this.configService.get<string>("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY") ||
-          null
-      };
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Stripe payment intent creation failed.";
-
-      const failedPayment = await this.prisma.payment.update({
-        where: { id: input.paymentId },
-        data: {
-          status: PaymentStatus.failed,
-          failureMessage: message
-        }
-      });
-
-      await this.prisma.paymentEvent.create({
-        data: {
-          paymentId: failedPayment.id,
-          provider: PaymentProvider.stripe,
-          eventType: "payment_intent.failed_to_create",
-          payload: {
-            message
-          },
-          processedAt: new Date()
-        }
-      });
-
-      throw new ServiceUnavailableException(message);
-    }
-  }
-
-  private async initializeMockPayment(input: {
-    paymentId: string;
-    orderId: string;
-    orderNumber: string;
-    amountMinor: number;
-    currencyCode: string;
-    idempotencyKey: string;
-    customerEmail?: string;
-  }) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: input.paymentId },
-      include: {
-        order: true
-      }
-    });
-
-    if (!payment) {
-      throw new NotFoundException("Payment record not found.");
-    }
-
-    const mockIntentId = `mock_pi_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
-    const amountDisplay = fromMinorUnits(input.amountMinor);
-    const paymentMetadata = {
-      mode: "mock",
-      provider: "stripe",
-      mockIntentId,
-      amountMinor: input.amountMinor,
-      currencyCode: input.currencyCode,
-      customerEmail: input.customerEmail ?? null
-    };
-    const cartId =
-      payment.order.metadata &&
-      typeof payment.order.metadata === "object" &&
-      !Array.isArray(payment.order.metadata)
-        ? String((payment.order.metadata as Record<string, unknown>).cartId ?? "")
-        : "";
-
-    const updatedPayment = await this.prisma.$transaction(async tx => {
-      const nextPayment = await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          providerIntentId: mockIntentId,
-          providerPaymentId: mockIntentId,
-          status: PaymentStatus.paid,
-          amountAuthorized: amountDisplay,
-          amountCaptured: amountDisplay,
-          failureCode: null,
-          failureMessage: null,
-          metadata: paymentMetadata
-        }
-      });
-
-      await tx.paymentEvent.create({
-        data: {
-          paymentId: nextPayment.id,
-          provider: PaymentProvider.stripe,
-          eventType: "payment.mock_succeeded",
-          providerEventId: mockIntentId,
-          payload: paymentMetadata,
-          processedAt: new Date()
-        }
-      });
-
-      await tx.order.update({
-        where: { id: input.orderId },
-        data: {
-          status: OrderStatus.paid,
-          cancelledAt: null
-        }
-      });
-
-      if (cartId) {
-        await tx.cart.update({
-          where: { id: cartId },
-          data: {
-            status: CartStatus.converted
-          }
-        });
-      }
-
-      return nextPayment;
-    });
-
-    this.realtimeGateway.emitOrderUpdated({
-      orderId: input.orderId,
-      orderNumber: input.orderNumber,
-      status: OrderStatus.paid,
-      source: "payments"
-    });
-    this.realtimeGateway.emitBoardRefresh({
-      source: "payments",
-      orderId: input.orderId,
-      status: OrderStatus.paid
-    });
-
-    return {
-      payment: updatedPayment,
-      clientSecret: null,
-      publishableKey: null
-    };
   }
 
   async createCheckoutSession(input: {
@@ -422,79 +278,50 @@ export class PaymentsService {
     lineItems?: Array<{ name: string; amount: number; quantity: number }>;
     storefrontUrl?: string;
   }) {
-    if (!this.stripe) {
+    if (!this.sumUp || !this.merchantCode) {
       if (this.isMockPaymentsEnabled()) {
-        return this.initializeMockPayment(input);
+        return this.createMockCheckout(input);
       }
-      throw new ServiceUnavailableException("Stripe is not configured.");
+      throw new ServiceUnavailableException("SumUp is not configured.");
     }
 
     const storefrontUrl = input.storefrontUrl || this.getStorefrontUrl();
+    const decimalAmount = input.amountMinor / 100;
 
     try {
-      const session = await this.stripe.checkout.sessions.create(
-        {
-          mode: "payment",
-          payment_method_types: ["card", "link"],
-          line_items: input.lineItems && input.lineItems.length > 0
-            ? input.lineItems.map(item => ({
-                price_data: {
-                  currency: input.currencyCode.toLowerCase(),
-                  product_data: { name: item.name },
-                  unit_amount: item.amount
-                },
-                quantity: item.quantity
-              }))
-            : [
-                {
-                  price_data: {
-                    currency: input.currencyCode.toLowerCase(),
-                    product_data: { name: `Order ${input.orderNumber}` },
-                    unit_amount: input.amountMinor
-                  },
-                  quantity: 1
-                }
-              ],
-          success_url: `${storefrontUrl}/?payment=success&order=${input.orderNumber}`,
-          cancel_url: `${storefrontUrl}/?payment=cancelled&order=${input.orderNumber}`,
-          customer_email: input.customerEmail,
-          metadata: {
-            orderId: input.orderId,
-            orderNumber: input.orderNumber,
-            paymentId: input.paymentId,
-            idempotencyKey: input.idempotencyKey
-          }
-        },
-        { idempotencyKey: input.idempotencyKey }
-      );
+      const checkout = await this.sumUp.createCheckout({
+        checkout_reference: input.idempotencyKey,
+        amount: decimalAmount,
+        currency: input.currencyCode,
+        merchant_code: this.merchantCode,
+        description: `Order ${input.orderNumber}`,
+        redirect_url: `${storefrontUrl}/?payment=success&order=${input.orderNumber}`
+      });
 
       await this.prisma.payment.update({
         where: { id: input.paymentId },
         data: {
-          providerIntentId: session.id,
+          providerIntentId: checkout.id,
           status: PaymentStatus.pending,
           amountAuthorized: fromMinorUnits(input.amountMinor),
-          metadata: { checkoutSessionId: session.id, checkoutUrl: session.url }
+          metadata: { checkoutId: checkout.id, checkoutReference: checkout.checkout_reference }
         }
       });
 
       await this.prisma.paymentEvent.create({
         data: {
           paymentId: input.paymentId,
-          provider: PaymentProvider.stripe,
-          eventType: "checkout_session.created",
-          providerEventId: session.id,
-          payload: { sessionId: session.id, url: session.url },
+          provider: PaymentProvider.sumup,
+          eventType: "checkout.created",
+          providerEventId: checkout.id,
+          payload: { checkoutId: checkout.id, reference: checkout.checkout_reference },
           processedAt: new Date()
         }
       });
 
-      return {
-        checkoutUrl: session.url,
-        sessionId: session.id
-      };
+      return { checkoutId: checkout.id };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Checkout session creation failed.";
+      const message = error instanceof Error ? error.message : "SumUp checkout creation failed.";
       await this.prisma.payment.update({
         where: { id: input.paymentId },
         data: { status: PaymentStatus.failed, failureMessage: message }
@@ -503,75 +330,85 @@ export class PaymentsService {
     }
   }
 
-  private async handleCheckoutSessionCompleted(session: any, eventId: string) {
-    const paymentId = session.metadata?.paymentId;
-    if (!paymentId) return;
+  private async createMockCheckout(input: {
+    paymentId: string;
+    orderId: string;
+    orderNumber: string;
+    amountMinor: number;
+    currencyCode: string;
+    idempotencyKey: string;
+    customerEmail?: string;
+  }) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: input.paymentId },
+      include: { order: true }
+    });
 
-    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
-    if (!payment) return;
+    if (!payment) {
+      throw new NotFoundException("Payment record not found.");
+    }
 
-    const updatedPayment = await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        providerPaymentId: session.payment_intent,
-        status: PaymentStatus.paid,
-        amountCaptured: fromMinorUnits(session.amount_total)
+    const mockCheckoutId = `mock_su_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    const amountDisplay = fromMinorUnits(input.amountMinor);
+    const cartId =
+      payment.order.metadata &&
+      typeof payment.order.metadata === "object" &&
+      !Array.isArray(payment.order.metadata)
+        ? String((payment.order.metadata as Record<string, unknown>).cartId ?? "")
+        : "";
+
+    await this.prisma.$transaction(async tx => {
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          providerIntentId: mockCheckoutId,
+          providerPaymentId: mockCheckoutId,
+          status: PaymentStatus.paid,
+          amountAuthorized: amountDisplay,
+          amountCaptured: amountDisplay,
+          failureCode: null,
+          failureMessage: null,
+          metadata: { mode: "mock", provider: "sumup", mockCheckoutId }
+        }
+      });
+
+      await tx.paymentEvent.create({
+        data: {
+          paymentId: payment.id,
+          provider: PaymentProvider.sumup,
+          eventType: "checkout.mock_succeeded",
+          providerEventId: mockCheckoutId,
+          payload: { mode: "mock", mockCheckoutId },
+          processedAt: new Date()
+        }
+      });
+
+      await tx.order.update({
+        where: { id: input.orderId },
+        data: { status: OrderStatus.paid, cancelledAt: null }
+      });
+
+      if (cartId) {
+        await tx.cart.update({
+          where: { id: cartId },
+          data: { status: CartStatus.converted }
+        });
       }
-    });
-
-    await this.prisma.paymentEvent.create({
-      data: {
-        paymentId: updatedPayment.id,
-        provider: PaymentProvider.stripe,
-        eventType: "checkout.session.completed",
-        providerEventId: eventId,
-        payload: session,
-        processedAt: new Date()
-      }
-    });
-
-    const order = await this.prisma.order.update({
-      where: { id: payment.orderId },
-      data: { status: OrderStatus.paid }
-    });
-
-    await this.prisma.cart.updateMany({
-      where: { customerUserId: order.customerUserId, status: CartStatus.active },
-      data: { status: CartStatus.converted }
     });
 
     this.realtimeGateway.emitOrderUpdated({
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      status: order.status,
+      orderId: input.orderId,
+      orderNumber: input.orderNumber,
+      status: OrderStatus.paid,
       source: "payments"
     });
     this.realtimeGateway.emitBoardRefresh({
       source: "payments",
-      orderId: order.id,
-      status: order.status
-    });
-  }
-
-  private async handleCheckoutSessionExpired(session: any, eventId: string) {
-    const paymentId = session.metadata?.paymentId;
-    if (!paymentId) return;
-
-    await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: { status: PaymentStatus.failed, failureMessage: "Checkout session expired." }
+      orderId: input.orderId,
+      status: OrderStatus.paid
     });
 
-    await this.prisma.paymentEvent.create({
-      data: {
-        paymentId,
-        provider: PaymentProvider.stripe,
-        eventType: "checkout.session.expired",
-        providerEventId: eventId,
-        payload: session,
-        processedAt: new Date()
-      }
-    });
+    return { checkoutId: null };
   }
 
   getStorefrontUrl(): string {
@@ -594,122 +431,29 @@ export class PaymentsService {
     if (configured) {
       return configured === "true";
     }
-
     return this.configService.get<string>("NODE_ENV") !== "production";
   }
 
-  private async syncStripePaymentIntent(
-    paymentIntent: any,
-    providerEventId: string,
-    eventType: string
-  ) {
-    const payment =
-      (paymentIntent.metadata?.paymentId
-        ? await this.prisma.payment.findUnique({
-            where: { id: String(paymentIntent.metadata.paymentId) },
-            include: {
-              order: true
-            }
-          })
-        : null) ??
-      (paymentIntent.id
-        ? await this.prisma.payment.findFirst({
-            where: { providerIntentId: String(paymentIntent.id) },
-            include: {
-              order: true
-            }
-          })
-        : null);
-
-    if (!payment) {
-      throw new NotFoundException("Payment record for Stripe event was not found.");
+  private mapSumUpStatus(status: string): PaymentStatus {
+    switch (status) {
+      case "SUCCESS":
+        return PaymentStatus.paid;
+      case "FAILED":
+        return PaymentStatus.failed;
+      case "PENDING":
+      default:
+        return PaymentStatus.pending;
     }
+  }
 
-    const paymentStatus = this.mapStripeWebhookStatus(eventType, paymentIntent.status);
-    const orderStatus = this.mapOrderStatusFromPayment(paymentStatus);
-    const cartId =
-      payment.order.metadata &&
-      typeof payment.order.metadata === "object" &&
-      !Array.isArray(payment.order.metadata)
-        ? String((payment.order.metadata as Record<string, unknown>).cartId ?? "")
-        : "";
-
-    await this.prisma.$transaction(async tx => {
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          providerIntentId: paymentIntent.id ? String(paymentIntent.id) : payment.providerIntentId,
-          providerPaymentId: paymentIntent.latest_charge
-            ? String(paymentIntent.latest_charge)
-            : payment.providerPaymentId,
-          status: paymentStatus,
-          amountAuthorized:
-            typeof paymentIntent.amount === "number"
-              ? fromMinorUnits(paymentIntent.amount)
-              : payment.amountAuthorized,
-          amountCaptured:
-            typeof paymentIntent.amount_received === "number"
-              ? fromMinorUnits(paymentIntent.amount_received)
-              : payment.amountCaptured,
-          failureCode: paymentIntent.last_payment_error?.code ?? null,
-          failureMessage: paymentIntent.last_payment_error?.message ?? null,
-          metadata: JSON.parse(JSON.stringify(paymentIntent))
-        }
-      });
-
-      await tx.paymentEvent.create({
-        data: {
-          paymentId: payment.id,
-          provider: PaymentProvider.stripe,
-          eventType,
-          providerEventId,
-          payload: JSON.parse(JSON.stringify(paymentIntent)),
-          processedAt: new Date()
-        }
-      });
-
-      if (orderStatus) {
-        await tx.order.update({
-          where: { id: payment.orderId },
-          data: {
-            status: orderStatus,
-            cancelledAt: orderStatus === OrderStatus.cancelled ? new Date() : null
-          }
-        });
-      }
-
-      if (cartId) {
-        await tx.cart.updateMany({
-          where: { id: cartId },
-          data: {
-            status:
-              paymentStatus === PaymentStatus.paid ? CartStatus.converted : CartStatus.active
-          }
-        });
-      }
-    });
-
-    const refreshedOrder = await this.prisma.order.findUnique({
-      where: { id: payment.orderId },
-      select: {
-        id: true,
-        orderNumber: true,
-        status: true
-      }
-    });
-
-    if (refreshedOrder) {
-      this.realtimeGateway.emitOrderUpdated({
-        orderId: refreshedOrder.id,
-        orderNumber: refreshedOrder.orderNumber,
-        status: refreshedOrder.status,
-        source: "payments"
-      });
-      this.realtimeGateway.emitBoardRefresh({
-        source: "payments",
-        orderId: refreshedOrder.id,
-        status: refreshedOrder.status
-      });
+  private mapOrderStatusFromPayment(paymentStatus: PaymentStatus): OrderStatus | null {
+    switch (paymentStatus) {
+      case PaymentStatus.paid:
+        return OrderStatus.paid;
+      case PaymentStatus.cancelled:
+        return OrderStatus.cancelled;
+      default:
+        return null;
     }
   }
 
@@ -788,42 +532,4 @@ export class PaymentsService {
       }
     };
   }
-
-  private mapStripeStatus(status: string): PaymentStatus {
-    switch (status) {
-      case "requires_action":
-        return PaymentStatus.requires_action;
-      case "requires_capture":
-        return PaymentStatus.authorized;
-      case "succeeded":
-        return PaymentStatus.paid;
-      case "canceled":
-        return PaymentStatus.cancelled;
-      case "processing":
-      case "requires_confirmation":
-      case "requires_payment_method":
-      default:
-        return PaymentStatus.pending;
-    }
-  }
-
-  private mapStripeWebhookStatus(eventType: string, status: string): PaymentStatus {
-    if (eventType === "payment_intent.payment_failed") {
-      return PaymentStatus.failed;
-    }
-
-    return this.mapStripeStatus(status);
-  }
-
-  private mapOrderStatusFromPayment(paymentStatus: PaymentStatus): OrderStatus | null {
-    switch (paymentStatus) {
-      case PaymentStatus.paid:
-        return OrderStatus.paid;
-      case PaymentStatus.cancelled:
-        return OrderStatus.cancelled;
-      default:
-        return null;
-    }
-  }
-
 }

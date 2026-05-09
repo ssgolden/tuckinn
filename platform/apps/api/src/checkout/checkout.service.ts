@@ -18,9 +18,7 @@ type CheckoutResult = {
     provider: string;
     status: string;
     currencyCode: string;
-    checkoutUrl: string | null;
-    clientSecret: string | null;
-    publishableKey: string | null;
+    checkoutId: string | null;
   };
 };
 
@@ -51,7 +49,7 @@ export class CheckoutService {
       return existingCheckout;
     }
 
-    const provider = dto.paymentProvider ?? PaymentProvider.stripe;
+    const provider = dto.paymentProvider ?? PaymentProvider.sumup;
     this.paymentsService.ensureProviderConfigured(provider);
 
     const cart = await this.prisma.cart.findUnique({
@@ -190,7 +188,9 @@ export class CheckoutService {
       dto.idempotencyKey
     );
 
-    const checkoutUrl = 'checkoutUrl' in checkoutSession ? (checkoutSession as Record<string, unknown>).checkoutUrl as string | null : null;
+    const checkoutId = 'checkoutId' in checkoutSession
+      ? (checkoutSession as Record<string, unknown>).checkoutId as string | null
+      : null;
 
     if (finalizedCheckout) {
       const base = finalizedCheckout as Record<string, any>;
@@ -198,9 +198,7 @@ export class CheckoutService {
         ...base,
         payment: {
           ...(base.payment as Record<string, unknown>),
-          checkoutUrl,
-          clientSecret: null,
-          publishableKey: null
+          checkoutId
         }
       } as CheckoutResult;
     }
@@ -225,9 +223,7 @@ export class CheckoutService {
         provider: checkoutRecord.payment.provider,
         status: checkoutRecord.payment.status,
         currencyCode: checkoutRecord.payment.currencyCode,
-        checkoutUrl,
-        clientSecret: null,
-        publishableKey: null
+        checkoutId
       }
     } as CheckoutResult;
   }

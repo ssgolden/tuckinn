@@ -25,14 +25,14 @@ export class WebhooksController {
     private readonly webhooksService: WebhooksService
   ) {}
 
-  @Post("stripe")
+  @Post("sumup")
   @HttpCode(200)
   @Throttle({ default: { limit: 100, ttl: 60000 } })
-  handleStripeWebhook(
+  handleSumUpWebhook(
     @Req() request: { rawBody?: Buffer | string },
-    @Headers("stripe-signature") signature?: string
+    @Headers("x-sumup-signature") signature?: string
   ) {
-    return this.paymentsService.processStripeWebhook(
+    return this.paymentsService.processSumUpWebhook(
       request.rawBody ?? "",
       signature
     );

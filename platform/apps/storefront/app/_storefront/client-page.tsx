@@ -2,8 +2,6 @@
 
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState, useTransition, useRef } from "react";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import {
   buildInitialSelections,
   formatMoney,
@@ -127,7 +125,7 @@ export default function StorefrontHomePage() {
     : false;
 
   const [paymentState, setPaymentState] = useState<"idle" | "paying" | "confirmed" | "failed">("idle");
-  const [pendingPayment, setPendingPayment] = useState<{ clientSecret: string; publishableKey: string; orderNumber: string } | null>(null);
+  const [pendingPayment, setPendingPayment] = useState<{ checkoutId: string; orderNumber: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [menuError, setMenuError] = useState<string | null>(null);
@@ -602,7 +600,7 @@ export default function StorefrontHomePage() {
           : undefined;
       const result = await apiFetch<{
         order: { orderNumber: string };
-        payment: { provider: string; status: string; checkoutUrl?: string; clientSecret?: string; publishableKey?: string };
+        payment: { provider: string; status: string; checkoutId?: string | null };
       }>("/checkout/start", {
         method: "POST",
         body: JSON.stringify({
@@ -618,13 +616,9 @@ export default function StorefrontHomePage() {
         })
       });
 
-      if (result.payment.checkoutUrl) {
-        setIsRedirecting(true);
-        window.location.href = result.payment.checkoutUrl;
-      } else if (result.payment.clientSecret && result.payment.publishableKey) {
+      if (result.payment.checkoutId) {
         setPendingPayment({
-          clientSecret: result.payment.clientSecret,
-          publishableKey: result.payment.publishableKey,
+          checkoutId: result.payment.checkoutId,
           orderNumber: result.order.orderNumber
         });
         setPaymentState("paying");
@@ -641,7 +635,7 @@ export default function StorefrontHomePage() {
     }
   }
 
-function StripePaymentOverlay({
+function SumUpPaymentOverlay({
   pendingPayment,
   cartTotal,
   formatMoney,
@@ -649,99 +643,62 @@ function StripePaymentOverlay({
   onFailed,
   onCancel
 }: {
-  pendingPayment: { clientSecret: string; publishableKey: string; orderNumber: string };
+  pendingPayment: { checkoutId: string; orderNumber: string };
   cartTotal: number;
   formatMoney: (amount: number) => string;
   onSuccess: () => void;
   onFailed: (msg: string) => void;
   onCancel: () => void;
 }) {
-  const stripePromise = loadStripe(pendingPayment.publishableKey);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+
+    function tryMount() {
+      if (typeof window === "undefined" || !window.SumUpCard) {
+        setTimeout(tryMount, 200);
+        return;
+      }
+      window.SumUpCard.mount({
+        checkoutId: pendingPayment.checkoutId,
+        onResponse(type) {
+          if (type === "success") {
+            onSuccess();
+          } else if (type === "fail" || type === "error") {
+            onFailed("Payment was not completed. Please try again.");
+          }
+        }
+      });
+    }
+
+    tryMount();
+
+    return () => {
+      if (window.SumUpCard) {
+        try { window.SumUpCard.unmount(); } catch { /* ignore */ }
+      }
+    };
+  }, [pendingPayment.checkoutId, onSuccess, onFailed]);
+
   return (
     <div className="success-overlay">
-      <div className="success-card" style={{ maxWidth: 440 }}>
+      <div className="success-card" style={{ maxWidth: 480 }}>
         <h2>Pay for Order {pendingPayment.orderNumber}</h2>
         <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "4px 0 16px" }}>
           Total: {formatMoney(cartTotal)}
         </p>
-        <Elements stripe={stripePromise} options={{ clientSecret: pendingPayment.clientSecret }}>
-          <StripeCheckoutForm clientSecret={pendingPayment.clientSecret} onSuccess={onSuccess} onFailed={onFailed} onCancel={onCancel} />
-        </Elements>
+        <div id="sumup-card" style={{ minHeight: 200 }} />
+        <button
+          type="button"
+          style={{ marginTop: 16, background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "var(--text)", padding: "10px 24px", borderRadius: 8, cursor: "pointer", width: "100%" }}
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
       </div>
     </div>
-  );
-}
-
-function StripeCheckoutForm({
-  clientSecret,
-  onSuccess,
-  onFailed,
-  onCancel
-}: {
-  clientSecret: string;
-  onSuccess: () => void;
-  onFailed: (msg: string) => void;
-  onCancel: () => void;
-}) {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!stripe || !elements) return;
-    setIsProcessing(true);
-
-    const cardElement = elements.getElement(CardElement);
-    if (!cardElement) {
-      onFailed("Card input not available.");
-      setIsProcessing(false);
-      return;
-    }
-
-    const { error, paymentIntent } = await stripe.confirmCardPayment(
-      clientSecret,
-      { payment_method: { card: cardElement } }
-    );
-
-    if (error) {
-      onFailed(error.message || "Payment failed.");
-    } else if (paymentIntent?.status === "succeeded") {
-      onSuccess();
-    } else {
-      onFailed(`Payment status: ${paymentIntent?.status}. Please try again.`);
-    }
-    setIsProcessing(false);
-  }
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <div style={{
-        padding: "12px 14px",
-        border: "1px solid rgba(255,255,255,0.15)",
-        borderRadius: 8,
-        background: "rgba(255,255,255,0.04)",
-        marginBottom: 16
-      }}>
-        <CardElement options={{
-          style: {
-            base: {
-              color: "#fff",
-              fontFamily: "'Inter', system-ui, sans-serif",
-              fontSize: "16px",
-              "::placeholder": { color: "rgba(255,255,255,0.4)" }
-            },
-            invalid: { color: "#ff6b6b" }
-          }
-        }} />
-      </div>
-      <button type="submit" className="primary-action" disabled={!stripe || isProcessing} style={{ width: "100%" }}>
-        {isProcessing ? "Processing..." : "Pay Now"}
-      </button>
-      <button type="button" style={{ marginTop: 12, background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "var(--text)", padding: "10px 24px", borderRadius: 8, cursor: "pointer", width: "100%" }} onClick={onCancel}>
-        Cancel
-      </button>
-    </form>
   );
 }
 
@@ -792,7 +749,7 @@ function StripeCheckoutForm({
         <header className="app-header">
           <button type="button" className="header-brand" onClick={() => setView("home")} aria-label="Return to home">
             <div className="brand-logo">
-              <Image src="/logo.png" alt={`${BRAND_NAME} logo`} fill sizes="56px" priority />
+              <Image src="/logo.svg" alt={`${BRAND_NAME} logo`} fill sizes="80px" priority />
             </div>
             <div className="header-brand-copy">
               <strong>{BRAND_NAME}</strong>
@@ -873,7 +830,7 @@ function StripeCheckoutForm({
       )}
 
       {paymentState === "paying" && pendingPayment && (
-        <StripePaymentOverlay
+        <SumUpPaymentOverlay
           pendingPayment={pendingPayment}
           cartTotal={cart?.totalAmount ?? 0}
           formatMoney={formatMoney}
