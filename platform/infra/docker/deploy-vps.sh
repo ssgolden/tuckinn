@@ -80,9 +80,9 @@ validate_env_file() {
     SESSION_SECRET
     SEED_ADMIN_EMAIL
     SEED_ADMIN_PASSWORD
-    STRIPE_SECRET_KEY
-    STRIPE_WEBHOOK_SECRET
-    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    SUMUP_API_KEY
+    SUMUP_MERCHANT_CODE
+    SUMUP_WEBHOOK_SECRET
     ALLOWED_ORIGINS
   )
   local key
@@ -92,7 +92,7 @@ validate_env_file() {
   done
 
   if [[ "${ALLOW_PLACEHOLDER_SECRETS}" != "1" ]]; then
-    if grep -nE 'change-me|replace-me|replace-with-strong|sk_live_replace_me|pk_live_replace_me|whsec_replace_me' "${ENV_FILE}" >/dev/null; then
+    if grep -nE 'change-me|replace-me|replace-with-strong|REPLACE_WITH_' "${ENV_FILE}" >/dev/null; then
       die "Placeholder secret detected in ${ENV_FILE}. Set ALLOW_PLACEHOLDER_SECRETS=1 only if you intentionally want to bypass this guard."
     fi
   fi
