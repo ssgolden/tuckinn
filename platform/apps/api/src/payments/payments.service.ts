@@ -427,11 +427,13 @@ export class PaymentsService {
   }
 
   private isMockPaymentsEnabled() {
-    const configured = this.configService.get<string>("ALLOW_MOCK_PAYMENTS");
-    if (configured) {
-      return configured === "true";
-    }
-    return this.configService.get<string>("NODE_ENV") !== "production";
+    // Mock payments must be EXPLICITLY enabled — they never default on.
+    // Set ALLOW_MOCK_PAYMENTS=true ONLY for local dev without SumUp
+    // credentials. In any other environment (including production), if
+    // SUMUP_API_KEY or SUMUP_MERCHANT_CODE is missing, payment requests
+    // throw ServiceUnavailableException instead of silently faking
+    // success (which would mark orders paid without charging the card).
+    return this.configService.get<string>("ALLOW_MOCK_PAYMENTS") === "true";
   }
 
   private mapSumUpStatus(status: string): PaymentStatus {
