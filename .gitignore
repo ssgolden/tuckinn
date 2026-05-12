@@ -41,6 +41,19 @@ tmp-*
 *.key
 login.txt
 credentials.*
+*.env
+cloudflare-secrets.env
+*-secrets.env
+secrets.env
+
+# Backup files (DB schema dumps, etc.)
+*.backup
+*.backup.*
+*.bak
+
+# Windows accidental files
+nul
+platform/nul
 
 # Platform specific
 platform/apps/api/src/generated/
