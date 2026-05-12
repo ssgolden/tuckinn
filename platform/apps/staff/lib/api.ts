@@ -1,5 +1,7 @@
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3200/api";
+  typeof window !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL?.startsWith("https://")
+    ? "/api"  // Caddy proxies /api/* to the API container
+    : process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3200/api";
 export const SOCKET_BASE_URL = API_BASE_URL.replace(/\/api$/, "");
 
 export class ApiError extends Error {

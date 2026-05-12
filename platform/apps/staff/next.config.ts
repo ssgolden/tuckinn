@@ -4,10 +4,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
-  outputFileTracingRoot: path.join(__dirname, "../.."),
-  typescript: {
-    ignoreBuildErrors: true
-  }
+  outputFileTracingRoot: path.join(__dirname, "../..")
 };
 
 export default nextConfig;
