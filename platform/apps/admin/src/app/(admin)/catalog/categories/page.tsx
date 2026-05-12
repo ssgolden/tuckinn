@@ -295,11 +295,25 @@ export default function CategoriesPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveCategory(cat, "up")} disabled={cat.sortOrder === 0} aria-label="Move up">
-                      <ChevronUp className="h-3.5 w-3.5" />
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 min-h-[44px] min-w-[44px]" 
+                      onClick={() => moveCategory(cat, "up")} 
+                      disabled={cat.sortOrder === 0} 
+                      aria-label="Move up"
+                    >
+                      <ChevronUp className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveCategory(cat, "down")} disabled={cat.sortOrder === categories.length - 1} aria-label="Move down">
-                      <ChevronDown className="h-3.5 w-3.5" />
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 min-h-[44px] min-w-[44px]" 
+                      onClick={() => moveCategory(cat, "down")} 
+                      disabled={cat.sortOrder === categories.length - 1} 
+                      aria-label="Move down"
+                    >
+                      <ChevronDown className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>

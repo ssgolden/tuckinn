@@ -216,14 +216,14 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
                       href={child.href}
                       onClick={onNavigate}
                       aria-current={active ? "page" : undefined}
-                      className={`flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors min-h-[40px] ${
                         active
                           ? "bg-brand/20 text-brand font-medium"
                           : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                       }`}
                     >
-                      <child.icon className="h-3.5 w-3.5" />
-                      {child.label}
+                      <child.icon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{child.label}</span>
                     </Link>
                   );
                 })}
@@ -239,14 +239,14 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
             href={item.href!}
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors min-h-[44px] ${
               active
                 ? "bg-brand/20 text-brand"
                 : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
             }`}
           >
-            <item.icon className="h-4 w-4" />
-            {item.label}
+            <item.icon className="h-4 w-4 shrink-0" />
+            <span className="truncate">{item.label}</span>
           </Link>
         );
       })}
@@ -351,12 +351,21 @@ export function Sidebar() {
   return (
     <>
       {/* Mobile menu button — visible below lg breakpoint */}
-      <div className="lg:hidden fixed top-3 left-3 z-40">
+      <div className="lg:hidden fixed top-3 left-3 z-50">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetTrigger render={<Button variant="outline" size="icon" aria-label="Open navigation menu" className="bg-[#0a0a0a] border-border/50 text-foreground hover:bg-muted" />}>
-            <Menu className="h-5 w-5" />
-            <span className="sr-only">Open navigation menu</span>
-          </SheetTrigger>
+          <SheetTrigger
+            render={
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Open navigation menu"
+                className="bg-[#0a0a0a] border-border/50 text-foreground hover:bg-muted h-11 w-11"
+              >
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">Open navigation menu</span>
+              </Button>
+            }
+          />
           <SheetContent side="left" showCloseButton={false} className="w-72 p-0 bg-[#0a0a0a] border-border/30">
             <SidebarContent onNavigate={() => setMobileOpen(false)} />
           </SheetContent>
