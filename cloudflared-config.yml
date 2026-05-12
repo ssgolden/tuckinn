@@ -1,0 +1,15 @@
+# Cloudflared configuration for Tuckinn Proper
+tunnel: tuckinn-proper
+
+# Forward traffic to local Caddy instance
+ingress:
+  - hostname: tuckinn-proper.trycloudflare.com
+    service: http://localhost:3000
+  - service: http_status:404
+
+# Logging
+logfile: /var/log/cloudflared.log
+loglevel: info
+
+# Protocol
+protocol: http2
