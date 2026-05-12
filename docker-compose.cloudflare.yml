@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: tuckinn-cloudflared
+    command: tunnel --url http://caddy:80 --protocol http2
+    restart: unless-stopped
+    networks:
+      - tuckinn-platform_tuckinn-network
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    profiles:
+      - cloudflare
+
+networks:
+  tuckinn-platform_tuckinn-network:
+    external: true
