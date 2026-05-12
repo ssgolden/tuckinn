@@ -39,7 +39,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </a>
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center gap-4 px-6 lg:px-8 pt-4 lg:pt-6 pb-2">
+        <header className="flex items-center gap-4 px-6 lg:px-8 pt-14 lg:pt-6 pb-2">
           <Breadcrumbs />
         </header>
         <main id="main-content" className="flex-1 overflow-y-auto px-6 lg:px-8 pb-6 lg:pb-8">

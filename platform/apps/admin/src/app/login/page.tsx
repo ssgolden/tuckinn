@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useState, type FormEvent, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,14 +13,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, session, isLoading } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+
+  // Redirect to dashboard if already logged in
+  useEffect(() => {
+    if (!isLoading && session) {
+      router.replace("/");
+    }
+  }, [isLoading, session, router]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -29,6 +36,7 @@ export default function LoginPage() {
     setIsPending(true);
     try {
       await login(email, password);
+      // Redirect to dashboard after successful login
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
@@ -41,8 +49,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] p-4">
       <Card className="w-full max-w-md shadow-xl border-border/50 bg-[#111]">
         <CardHeader className="text-center space-y-3 pb-2">
-          <div className="mx-auto w-20 h-20 relative rounded-xl overflow-hidden ring-2 ring-border/50">
-            <Image src="/logo.svg" alt="Tuckinn Proper" fill className="object-cover" priority />
+          <div className="mx-auto w-24 h-24 relative">
+            <Image src="/logo.svg" alt="Tuckinn Proper" fill className="object-contain" priority />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">
             Tuckinn Proper

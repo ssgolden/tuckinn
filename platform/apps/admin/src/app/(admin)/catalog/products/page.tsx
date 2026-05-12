@@ -28,7 +28,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Archive, RotateCcw, Search, Pencil, Plus, Package, AlertTriangle, Image as ImageIcon, ArrowLeft, ArrowRight, Trash2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Archive, RotateCcw, Search, Pencil, Plus, Package, AlertTriangle, Image as ImageIcon, ArrowLeft, ArrowRight, Trash2, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
@@ -214,12 +220,12 @@ export default function ProductsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[40%]">Product</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Variants</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-[35%] min-w-[200px]">Product</TableHead>
+                <TableHead className="min-w-[100px]">Category</TableHead>
+                <TableHead className="w-[80px] text-center hidden sm:table-cell">Variants</TableHead>
+                <TableHead className="w-[100px] hidden md:table-cell">Price</TableHead>
+                <TableHead className="w-[100px]">Status</TableHead>
+                <TableHead className="text-right w-[60px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -237,36 +243,62 @@ export default function ProductsPage() {
               ) : (
                 paginated.map(prod => (
                   <TableRow key={prod.id} className="cursor-pointer hover:bg-muted/50" onClick={() => router.push(`/catalog/products/${prod.id}`)}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
+                    <TableCell className="max-w-0">
+                      <div className="flex items-center gap-3 min-w-0">
                         {prod.imageUrl ? (
-                          <img src={prod.imageUrl} alt={prod.name} className="h-10 w-10 rounded object-cover border" />
+                          <img src={prod.imageUrl} alt={prod.name} className="h-10 w-10 rounded object-cover border shrink-0" />
                         ) : (
-                          <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center"><ImageIcon className="h-4 w-4 text-muted-foreground" /></div>
+                          <div className="h-10 w-10 rounded border bg-muted flex items-center justify-center shrink-0"><ImageIcon className="h-4 w-4 text-muted-foreground" /></div>
                         )}
-                        <div>
-                          <span className="font-medium">{prod.name}</span>
-                          {prod.isFeatured && <Badge variant="secondary" className="ml-2 text-xs">Featured</Badge>}
-                          {prod.shortDescription && <p className="text-xs text-muted-foreground line-clamp-1">{prod.shortDescription}</p>}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium truncate block">{prod.name}</span>
+                            {prod.isFeatured && <Badge variant="secondary" className="text-xs shrink-0">Featured</Badge>}
+                          </div>
+                          {prod.shortDescription && <p className="text-xs text-muted-foreground truncate mt-0.5">{prod.shortDescription}</p>}
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell><Badge variant="outline" className="text-xs">{prod.category?.name || "—"}</Badge></TableCell>
-                    <TableCell className="text-sm">{prod.variants?.length || 1}</TableCell>
-                    <TableCell className="font-medium">{prod.variants?.[0] ? formatPrice(prod.variants[0].priceAmount) : "—"}</TableCell>
+                    <TableCell><Badge variant="outline" className="text-xs truncate max-w-[120px] inline-block">{prod.category?.name || "—"}</Badge></TableCell>
+                    <TableCell className="text-sm text-center hidden sm:table-cell">{prod.variants?.length || 1}</TableCell>
+                    <TableCell className="font-medium hidden md:table-cell">{prod.variants?.[0] ? formatPrice(prod.variants[0].priceAmount) : "—"}</TableCell>
                     <TableCell>
-                      <Badge variant={prod.status === "active" ? "default" : "secondary"}>{prod.status}</Badge>
+                      <Badge variant={prod.status === "active" ? "default" : "secondary"} className="text-xs">{prod.status === "active" ? "Active" : "Archived"}</Badge>
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm" onClick={() => router.push(`/catalog/products/${prod.id}`)} aria-label={`Edit ${prod.name}`}><Pencil className="h-3.5 w-3.5" /></Button>
-                      {prod.status === "active" ? (
-                        <Button variant="ghost" size="sm" onClick={() => setArchiveTarget(prod)} aria-label={`Archive ${prod.name}`}><Archive className="h-3.5 w-3.5" /></Button>
-                      ) : (
-                        <>
-                          <Button variant="ghost" size="sm" onClick={() => restoreProduct(prod.id)} aria-label={`Restore ${prod.name}`}><RotateCcw className="h-3.5 w-3.5" /></Button>
-                          <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(prod)} aria-label={`Delete ${prod.name}`} className="text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
-                        </>
-                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Open menu</span>
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => router.push(`/catalog/products/${prod.id}`)}>
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Edit
+                          </DropdownMenuItem>
+                          {prod.status === "active" ? (
+                            <DropdownMenuItem onClick={() => setArchiveTarget(prod)}>
+                              <Archive className="h-4 w-4 mr-2" />
+                              Archive
+                            </DropdownMenuItem>
+                          ) : (
+                            <>
+                              <DropdownMenuItem onClick={() => restoreProduct(prod.id)}>
+                                <RotateCcw className="h-4 w-4 mr-2" />
+                                Restore
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setDeleteTarget(prod)} className="text-destructive focus:text-destructive">
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))
